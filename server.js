@@ -9,6 +9,7 @@ import quoteRoutes from './routes/quote.routes.js';
 import userRoutes from './routes/user.routes.js';
 import adminRoutes from './routes/admin.routes.js';
 import categoryRoutes from './routes/category.routes.js';
+import settingsRoutes from './routes/settings.routes.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
 dotenv.config();
@@ -36,6 +37,7 @@ app.use('/api/quotes', quoteRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/categories', categoryRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
