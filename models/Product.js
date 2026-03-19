@@ -63,9 +63,42 @@ const productSchema = new mongoose.Schema({
       y: Number,
     }],
   },
+  // Controls which CTAs appear on product detail page (design studio / upload design)
+  uiOptions: {
+    showEditorButton: { type: Boolean, default: true },
+    showUploadDesignButton: { type: Boolean, default: true },
+  },
+  // Optional sizes for products that require selecting a size (e.g., boards, banners, posters)
+  sizeOptions: {
+    enabled: { type: Boolean, default: false },
+    required: { type: Boolean, default: false },
+    options: [
+      {
+        label: { type: String, trim: true },
+        value: { type: String, trim: true },
+      },
+    ],
+  },
+  // Optional delivery pricing table (quantity x delivery speed)
+  pricingTable: {
+    enabled: { type: Boolean, default: false },
+    quantities: [{ type: Number }],
+    deliveryOptions: [
+      {
+        key: { type: String, trim: true },   // e.g. saver | standard | express
+        label: { type: String, trim: true }, // e.g. Saver | Standard | Express
+        etaDays: { type: Number },           // used to compute ETA label
+        prices: [{ type: Number }],          // must align with quantities index
+      },
+    ],
+  },
   isActive: {
     type: Boolean,
     default: true,
+  },
+  isRecommended: {
+    type: Boolean,
+    default: false,
   },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,

@@ -65,6 +65,35 @@ router.post('/products', (req, res, next) => {
       createdBy: req.user._id,
     };
 
+    // Optional JSON fields sent via multipart/form-data
+    if (req.body.uiOptions) {
+      try {
+        productData.uiOptions = typeof req.body.uiOptions === 'string'
+          ? JSON.parse(req.body.uiOptions)
+          : req.body.uiOptions;
+      } catch (e) {
+        console.warn('Invalid uiOptions JSON, ignoring:', e?.message);
+      }
+    }
+    if (req.body.sizeOptions) {
+      try {
+        productData.sizeOptions = typeof req.body.sizeOptions === 'string'
+          ? JSON.parse(req.body.sizeOptions)
+          : req.body.sizeOptions;
+      } catch (e) {
+        console.warn('Invalid sizeOptions JSON, ignoring:', e?.message);
+      }
+    }
+    if (req.body.pricingTable) {
+      try {
+        productData.pricingTable = typeof req.body.pricingTable === 'string'
+          ? JSON.parse(req.body.pricingTable)
+          : req.body.pricingTable;
+      } catch (e) {
+        console.warn('Invalid pricingTable JSON, ignoring:', e?.message);
+      }
+    }
+
     // Validate basePrice
     if (isNaN(productData.basePrice) || productData.basePrice <= 0) {
       return res.status(400).json({ message: 'Invalid basePrice' });
@@ -98,6 +127,10 @@ router.put('/products/:id', (req, res, next) => {
   });
 }, async (req, res) => {
   try {
+    console.log('Product update request received');
+    console.log('Files:', req.files ? req.files.length : 0);
+    console.log('Body:', req.body);
+
     const product = await Product.findById(req.params.id);
     if (!product) {
       return res.status(404).json({ message: 'Product not found' });
@@ -121,6 +154,33 @@ router.put('/products/:id', (req, res, next) => {
     }
     if (req.body.isActive !== undefined) {
       product.isActive = req.body.isActive === 'true' || req.body.isActive === true;
+    }
+    if (req.body.uiOptions !== undefined) {
+      try {
+        product.uiOptions = typeof req.body.uiOptions === 'string'
+          ? JSON.parse(req.body.uiOptions)
+          : req.body.uiOptions;
+      } catch (e) {
+        console.warn('Invalid uiOptions JSON, ignoring:', e?.message);
+      }
+    }
+    if (req.body.sizeOptions !== undefined) {
+      try {
+        product.sizeOptions = typeof req.body.sizeOptions === 'string'
+          ? JSON.parse(req.body.sizeOptions)
+          : req.body.sizeOptions;
+      } catch (e) {
+        console.warn('Invalid sizeOptions JSON, ignoring:', e?.message);
+      }
+    }
+    if (req.body.pricingTable !== undefined) {
+      try {
+        product.pricingTable = typeof req.body.pricingTable === 'string'
+          ? JSON.parse(req.body.pricingTable)
+          : req.body.pricingTable;
+      } catch (e) {
+        console.warn('Invalid pricingTable JSON, ignoring:', e?.message);
+      }
     }
 
     await product.save();

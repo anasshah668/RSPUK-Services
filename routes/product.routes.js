@@ -60,4 +60,49 @@ router.get('/category/:category', async (req, res) => {
   }
 });
 
+// @route   GET /api/products/recommended
+// @desc    Get recommended products (mix of isRecommended=true and popular products)
+// @access  Public
+router.get('/recommended', async (req, res) => {
+  try {
+    const { limit = 8, category } = req.query;
+    const limitNum = parseInt(limit, 10);
+    
+    // Build query
+    const query = { isActive: true };
+    if (category) {
+      query.category = category;
+    }
+    
+    // Get recommended products first (isRecommended = true)
+    const recommended = await Product.find({ ...query, isRecommended: true })
+      .limit(limitNum)
+      .sort({ createdAt: -1 });
+    
+    // If we need more, get popular products (most recent, excluding already fetched)
+    const recommendedIds = recommended.map(p => p._id);
+    const remaining = limitNum - recommended.length;
+    
+    let popular = [];
+    if (remaining > 0) {
+      popular = await Product.find({
+        ...query,
+        _id: { $nin: recommendedIds }
+      })
+        .limit(remaining)
+        .sort({ createdAt: -1 });
+    }
+    
+    // Combine and return
+    const products = [...recommended, ...popular];
+    
+    res.json({
+      products,
+      total: products.length,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 export default router;
