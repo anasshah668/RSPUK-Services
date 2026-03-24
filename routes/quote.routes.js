@@ -1,5 +1,6 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
+import sgMail from '@sendgrid/mail';
 import Quote from '../models/Quote.js';
 import { protect, admin } from '../middleware/auth.js';
 import { upload, uploadToCloudinary } from '../config/cloudinary.js';
@@ -99,6 +100,66 @@ router.put('/:id', protect, admin, async (req, res) => {
 
     await quote.save();
     res.json(quote);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// @route   POST /api/quotes/:id/send-email
+// @desc    Send quotation email to customer (admin only)
+// @access  Private/Admin
+router.post('/:id/send-email', protect, admin, async (req, res) => {
+  try {
+    const quote = await Quote.findById(req.params.id);
+    if (!quote) {
+      return res.status(404).json({ message: 'Quote not found' });
+    }
+
+    if (!quote.email) {
+      return res.status(400).json({ message: 'Customer email is missing for this quote' });
+    }
+
+    const sendGridApiKey = process.env.SENDGRID_API_KEY;
+    const senderEmail = process.env.SENDGRID_FROM_EMAIL || process.env.MAIL_FROM;
+    if (!sendGridApiKey || !senderEmail) {
+      return res.status(500).json({ message: 'SendGrid is not configured on server' });
+    }
+    sgMail.setApiKey(sendGridApiKey);
+
+    const responseText = req.body?.adminResponse || quote.adminResponse || '';
+    const quotedPrice = req.body?.quotedPrice ?? quote.quotedPrice;
+    const formattedPrice = quotedPrice !== undefined && quotedPrice !== null && quotedPrice !== ''
+      ? `£${Number(quotedPrice).toFixed(2)}`
+      : 'TBC';
+
+    const subject = `Quotation for ${quote.projectType || 'your project'}`;
+    const html = `
+      <p>Hi ${quote.name || 'Customer'},</p>
+      <p>Thank you for your quote request.</p>
+      ${responseText ? `<p><strong>Quotation Notes:</strong><br/>${String(responseText).replace(/\n/g, '<br/>')}</p>` : ''}
+      <p><strong>Quoted Price:</strong> ${formattedPrice}</p>
+      <p><strong>Project Type:</strong> ${quote.projectType || 'N/A'}</p>
+      <p><strong>Quantity:</strong> ${quote.quantity || 'N/A'}</p>
+      <p><strong>Ideal Sign Width:</strong> ${quote.idealSignWidth || 'N/A'}</p>
+      <p>Please reply to this email if you would like to proceed.</p>
+      <p>Best regards,<br/>RSP Team</p>
+    `;
+
+    await sgMail.send({
+      from: senderEmail,
+      to: quote.email,
+      subject,
+      html,
+    });
+
+    quote.status = req.body?.status || quote.status || 'quoted';
+    quote.adminResponse = responseText || quote.adminResponse;
+    quote.quotedPrice = quotedPrice !== undefined && quotedPrice !== null && quotedPrice !== '' ? Number(quotedPrice) : quote.quotedPrice;
+    quote.respondedBy = req.user._id;
+    quote.respondedAt = new Date();
+    await quote.save();
+
+    res.json({ message: 'Quotation email sent successfully', quote });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
