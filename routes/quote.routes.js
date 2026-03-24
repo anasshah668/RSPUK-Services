@@ -2,13 +2,14 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import Quote from '../models/Quote.js';
 import { protect, admin } from '../middleware/auth.js';
+import { upload, uploadToCloudinary } from '../config/cloudinary.js';
 
 const router = express.Router();
 
 // @route   POST /api/quotes
 // @desc    Create new quote request
 // @access  Public
-router.post('/', [
+router.post('/', upload.single('artwork'), [
   body('name').trim().notEmpty().withMessage('Name is required'),
   body('email').isEmail().withMessage('Please provide a valid email'),
   body('phone').notEmpty().withMessage('Phone is required'),
@@ -20,7 +21,15 @@ router.post('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const quote = await Quote.create(req.body);
+    const payload = { ...req.body };
+
+    if (req.file?.buffer) {
+      const uploadedArtwork = await uploadToCloudinary(req.file.buffer, 'printing-platform/quotes');
+      payload.artworkUrl = uploadedArtwork.url;
+      payload.artworkPublicId = uploadedArtwork.publicId;
+    }
+
+    const quote = await Quote.create(payload);
     res.status(201).json(quote);
   } catch (error) {
     res.status(500).json({ message: error.message });

@@ -13,17 +13,38 @@ const quoteSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  country: {
+    type: String,
+    default: 'United Kingdom',
+  },
   company: {
     type: String,
+  },
+  quoteType: {
+    type: String,
+    enum: ['standard', 'logo-artwork'],
+    default: 'standard',
   },
   projectType: {
     type: String,
     required: true,
   },
+  idealSignWidth: {
+    type: String,
+  },
   quantity: {
     type: String,
   },
+  additionalInfo: {
+    type: String,
+  },
   message: {
+    type: String,
+  },
+  artworkUrl: {
+    type: String,
+  },
+  artworkPublicId: {
     type: String,
   },
   preferredContact: {
