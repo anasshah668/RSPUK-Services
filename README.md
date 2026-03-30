@@ -61,6 +61,13 @@ CLOUDINARY_API_SECRET=your-cloudinary-api-secret
 
 # Frontend URL
 FRONTEND_URL=http://localhost:5173
+
+# Third-party API (v2/login)
+THIRD_PARTY_BASE_URL=https://example-third-party.com
+THIRD_PARTY_USERNAME=your-username
+THIRD_PARTY_PASSWORD=your-password
+# Optional fallback TTL when API response doesn't include expiry
+THIRD_PARTY_TOKEN_TTL_SECONDS=3000
 ```
 
 ### 3. Start MongoDB
@@ -116,6 +123,11 @@ The server will start on `http://localhost:5000`
 - `POST /api/admin/products` - Create product (admin only)
 - `PUT /api/admin/products/:id` - Update product (admin only)
 - `DELETE /api/admin/products/:id` - Delete product (admin only)
+
+### Third-Party Integration
+- `POST /api/third-party/auth/login` - Authenticate and refresh cached third-party token (admin only)
+- `GET /api/third-party/auth/token` - Get/ensure cached token availability (admin only)
+- `GET /api/third-party/products/attributes` - Proxy product attributes from third-party API (public backend endpoint for frontend consumption)
 
 ## Creating Admin User
 
