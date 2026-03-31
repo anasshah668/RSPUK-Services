@@ -136,3 +136,50 @@ export const fetchThirdPartyProductAttributes = async ({ forceRefresh = false } 
     products: normalizeAttributesResult(result),
   };
 };
+
+export const fetchThirdPartyProductAttributesByName = async (productName, { forceRefresh = false } = {}) => {
+  if (!productName) {
+    throw new Error('productName is required');
+  }
+
+  const { baseUrl } = getAuthConfig();
+  let token = await getThirdPartyToken({ forceRefresh });
+  const encodedName = encodeURIComponent(productName);
+  const endpoint = `${baseUrl}/v2/products-v2/attributes-v2/${encodedName}`;
+
+  const callApi = async (authToken) => {
+    const response = await fetch(endpoint, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    return { response, payload };
+  };
+
+  let { response, payload } = await callApi(token);
+
+  if (response.status === 401) {
+    token = await getThirdPartyToken({ forceRefresh: true });
+    ({ response, payload } = await callApi(token));
+  }
+
+  if (!response.ok) {
+    const message = payload?.message || payload?.error || `Failed to fetch product attributes (${response.status})`;
+    throw new Error(message);
+  }
+
+  const result = payload?.result || payload?.data || {};
+  const values = result?.values || {};
+  return {
+    success: payload?.success !== false,
+    raw: result,
+    product: {
+      name: productName,
+      productKey: values?.productKey || null,
+      attributes: values?.attributes || {},
+    },
+  };
+};
