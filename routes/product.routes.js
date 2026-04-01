@@ -1,14 +1,75 @@
 import express from 'express';
 import Product from '../models/Product.js';
 import { protect } from '../middleware/auth.js';
+import { fetchThirdPartyProductAttributes } from '../services/thirdPartyAuth.service.js';
 
 const router = express.Router();
+const ALLOWED_PRODUCT_KEYWORDS = [
+  'business cards',
+  'flyers',
+  'leaflets',
+  'brochures',
+  'menus',
+  'calendars',
+  'stickers',
+];
+
+const getCategoryFromName = (name = '') => {
+  const normalized = String(name).toLowerCase();
+  if (normalized.includes('business card')) return 'business-cards';
+  if (normalized.includes('flyer')) return 'flyers';
+  if (normalized.includes('leaflet')) return 'leaflets';
+  if (normalized.includes('brochure')) return 'brochures';
+  if (normalized.includes('menu')) return 'menus';
+  if (normalized.includes('calendar')) return 'calendars';
+  if (normalized.includes('sticker')) return 'stickers';
+  return 'third-party';
+};
+
+const syncThirdPartyProductsIfNeeded = async () => {
+  const alreadySynced = await Product.exists({ source: 'third-party' });
+  if (alreadySynced) return;
+
+  const data = await fetchThirdPartyProductAttributes();
+  const filteredProducts = (data.products || []).filter((product) => {
+    const name = String(product?.name || '').toLowerCase();
+    return ALLOWED_PRODUCT_KEYWORDS.some((keyword) => name.includes(keyword));
+  });
+
+  await Promise.all(
+    filteredProducts.map((tpProduct) =>
+      Product.findOneAndUpdate(
+        { name: tpProduct.name, source: 'third-party' },
+        {
+          $set: {
+            name: tpProduct.name,
+            description: `${tpProduct.name} synced from Tradeprint`,
+            category: getCategoryFromName(tpProduct.name),
+            basePrice: 0,
+            isActive: true,
+            source: 'third-party',
+            thirdPartyProductKey: tpProduct.productKey || null,
+            thirdPartyAttributes: tpProduct.attributes || {},
+          },
+          $setOnInsert: {
+            variants: [],
+            features: [],
+            productImage: { url: '', publicId: '' },
+            images: [],
+          },
+        },
+        { upsert: true, new: true }
+      )
+    )
+  );
+};
 
 // @route   GET /api/products
 // @desc    Get all products
 // @access  Public
 router.get('/', async (req, res) => {
   try {
+    await syncThirdPartyProductsIfNeeded();
     const { category, page = 1, limit = 12 } = req.query;
     const query = category ? { category, isActive: true } : { isActive: true };
     

@@ -40,6 +40,11 @@ const productSchema = new mongoose.Schema({
     url: String,
     publicId: String,
   }],
+  // Dedicated image field for third-party synced products (editable from admin)
+  productImage: {
+    url: { type: String, default: '' },
+    publicId: { type: String, default: '' },
+  },
   basePrice: {
     type: Number,
     required: true,
@@ -91,6 +96,21 @@ const productSchema = new mongoose.Schema({
         prices: [{ type: Number }],          // must align with quantities index
       },
     ],
+  },
+  source: {
+    type: String,
+    enum: ['local', 'third-party'],
+    default: 'local',
+    index: true,
+  },
+  thirdPartyProductKey: {
+    type: String,
+    default: null,
+    trim: true,
+  },
+  thirdPartyAttributes: {
+    type: mongoose.Schema.Types.Mixed,
+    default: {},
   },
   isActive: {
     type: Boolean,

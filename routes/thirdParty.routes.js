@@ -1,5 +1,6 @@
 import express from 'express';
 import { admin, protect } from '../middleware/auth.js';
+import Product from '../models/Product.js';
 import {
   fetchThirdPartyProductAttributes,
   fetchThirdPartyProductAttributesByName,
@@ -7,6 +8,27 @@ import {
 } from '../services/thirdPartyAuth.service.js';
 
 const router = express.Router();
+const ALLOWED_PRODUCT_KEYWORDS = [
+  'business cards',
+  'flyers',
+  'leaflets',
+  'brochures',
+  'menus',
+  'calendars',
+  'stickers',
+];
+
+const getCategoryFromName = (name = '') => {
+  const normalized = String(name).toLowerCase();
+  if (normalized.includes('business card')) return 'business-cards';
+  if (normalized.includes('flyer')) return 'flyers';
+  if (normalized.includes('leaflet')) return 'leaflets';
+  if (normalized.includes('brochure')) return 'brochures';
+  if (normalized.includes('menu')) return 'menus';
+  if (normalized.includes('calendar')) return 'calendars';
+  if (normalized.includes('sticker')) return 'stickers';
+  return 'third-party';
+};
 
 // @route   POST /api/third-party/auth/login
 // @desc    Authenticate with third-party API and cache token
@@ -46,10 +68,47 @@ router.get('/products/attributes', async (req, res) => {
   try {
     const forceRefresh = String(req.query.forceRefresh || '').toLowerCase() === 'true';
     const data = await fetchThirdPartyProductAttributes({ forceRefresh });
+    const filteredProducts = (data.products || []).filter((product) => {
+      const name = String(product?.name || '').toLowerCase();
+      return ALLOWED_PRODUCT_KEYWORDS.some((keyword) => name.includes(keyword));
+    });
+
+    const upsertedProducts = await Promise.all(
+      filteredProducts.map(async (tpProduct) => {
+        const update = {
+          name: tpProduct.name,
+          description: `${tpProduct.name} synced from Tradeprint`,
+          category: getCategoryFromName(tpProduct.name),
+          basePrice: 0,
+          isActive: true,
+          source: 'third-party',
+          thirdPartyProductKey: tpProduct.productKey || null,
+          thirdPartyAttributes: tpProduct.attributes || {},
+        };
+
+        return Product.findOneAndUpdate(
+          { name: tpProduct.name, source: 'third-party' },
+          {
+            $set: update,
+            $setOnInsert: {
+              variants: [],
+              features: [],
+              // Keep a dedicated image field for admin upload/edit
+              productImage: { url: '', publicId: '' },
+              // Keep legacy images array compatible with existing UI
+              images: [],
+            },
+          },
+          { upsert: true, new: true }
+        );
+      })
+    );
+
     res.json({
       success: true,
       result: data.raw,
-      products: data.products,
+      products: filteredProducts,
+      syncedCount: upsertedProducts.length,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
