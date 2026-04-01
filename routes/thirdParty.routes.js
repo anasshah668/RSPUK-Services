@@ -30,6 +30,51 @@ const getCategoryFromName = (name = '') => {
   return 'third-party';
 };
 
+const syncThirdPartyProducts = async ({ forceRefresh = false } = {}) => {
+  const data = await fetchThirdPartyProductAttributes({ forceRefresh });
+  const filteredProducts = (data.products || []).filter((product) => {
+    const name = String(product?.name || '').toLowerCase();
+    return ALLOWED_PRODUCT_KEYWORDS.some((keyword) => name.includes(keyword));
+  });
+
+  const upsertedProducts = await Promise.all(
+    filteredProducts.map(async (tpProduct) => {
+      const update = {
+        name: tpProduct.name,
+        description: `${tpProduct.name} synced from Tradeprint`,
+        category: getCategoryFromName(tpProduct.name),
+        basePrice: 0,
+        isActive: true,
+        source: 'third-party',
+        thirdPartyProductKey: tpProduct.productKey || null,
+        thirdPartyAttributes: tpProduct.attributes || {},
+      };
+
+      return Product.findOneAndUpdate(
+        { name: tpProduct.name, source: 'third-party' },
+        {
+          $set: update,
+          $setOnInsert: {
+            variants: [],
+            features: [],
+            // Keep a dedicated image field for admin upload/edit
+            productImage: { url: '', publicId: '' },
+            // Keep legacy images array compatible with existing UI
+            images: [],
+          },
+        },
+        { upsert: true, new: true }
+      );
+    })
+  );
+
+  return {
+    raw: data.raw,
+    filteredProducts,
+    syncedCount: upsertedProducts.length,
+  };
+};
+
 // @route   POST /api/third-party/auth/login
 // @desc    Authenticate with third-party API and cache token
 // @access  Private/Admin
@@ -67,48 +112,31 @@ router.get('/auth/token', protect, admin, async (req, res) => {
 router.get('/products/attributes', async (req, res) => {
   try {
     const forceRefresh = String(req.query.forceRefresh || '').toLowerCase() === 'true';
-    const data = await fetchThirdPartyProductAttributes({ forceRefresh });
-    const filteredProducts = (data.products || []).filter((product) => {
-      const name = String(product?.name || '').toLowerCase();
-      return ALLOWED_PRODUCT_KEYWORDS.some((keyword) => name.includes(keyword));
-    });
-
-    const upsertedProducts = await Promise.all(
-      filteredProducts.map(async (tpProduct) => {
-        const update = {
-          name: tpProduct.name,
-          description: `${tpProduct.name} synced from Tradeprint`,
-          category: getCategoryFromName(tpProduct.name),
-          basePrice: 0,
-          isActive: true,
-          source: 'third-party',
-          thirdPartyProductKey: tpProduct.productKey || null,
-          thirdPartyAttributes: tpProduct.attributes || {},
-        };
-
-        return Product.findOneAndUpdate(
-          { name: tpProduct.name, source: 'third-party' },
-          {
-            $set: update,
-            $setOnInsert: {
-              variants: [],
-              features: [],
-              // Keep a dedicated image field for admin upload/edit
-              productImage: { url: '', publicId: '' },
-              // Keep legacy images array compatible with existing UI
-              images: [],
-            },
-          },
-          { upsert: true, new: true }
-        );
-      })
-    );
+    const { raw, filteredProducts, syncedCount } = await syncThirdPartyProducts({ forceRefresh });
 
     res.json({
       success: true,
-      result: data.raw,
+      result: raw,
       products: filteredProducts,
-      syncedCount: upsertedProducts.length,
+      syncedCount,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route   POST /api/third-party/products/sync
+// @desc    Manually sync selected third-party products into DB
+// @access  Private/Admin
+router.post('/products/sync', protect, admin, async (req, res) => {
+  try {
+    const forceRefresh = String(req.query.forceRefresh || '').toLowerCase() === 'true';
+    const { filteredProducts, syncedCount } = await syncThirdPartyProducts({ forceRefresh });
+    res.json({
+      success: true,
+      message: 'Third-party products synced successfully',
+      products: filteredProducts,
+      syncedCount,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
