@@ -4,6 +4,7 @@ import Product from '../models/Product.js';
 import {
   fetchThirdPartyProductAttributes,
   fetchThirdPartyProductAttributesByName,
+  fetchThirdPartyProductPrices,
   getThirdPartyToken,
 } from '../services/thirdPartyAuth.service.js';
 
@@ -154,6 +155,29 @@ router.get('/products/attributes/:productName', async (req, res) => {
       success: true,
       result: data.raw,
       product: data.product,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route   POST /api/third-party/products/prices
+// @desc    Fetch prices for a product based on production attributes
+// @access  Public (safe proxy response)
+router.post('/products/prices', async (req, res) => {
+  try {
+    const forceRefresh = String(req.query.forceRefresh || '').toLowerCase() === 'true';
+    const { productId, productionData, quantity, serviceLevel } = req.body || {};
+
+    const data = await fetchThirdPartyProductPrices(
+      { productId, productionData, quantity, serviceLevel },
+      { forceRefresh }
+    );
+
+    res.json({
+      success: true,
+      result: data.raw,
+      prices: data.prices,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
