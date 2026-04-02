@@ -1,6 +1,7 @@
 import express from 'express';
 import { admin, protect } from '../middleware/auth.js';
 import Product from '../models/Product.js';
+import Category from '../models/Category.js';
 import {
   fetchThirdPartyProductAttributes,
   fetchThirdPartyProductAttributesByName,
@@ -31,12 +32,43 @@ const getCategoryFromName = (name = '') => {
   return 'third-party';
 };
 
+const getCategoryDisplayName = (categorySlug = '') => {
+  if (!categorySlug) return 'Third Party';
+  return String(categorySlug)
+    .split('-')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+};
+
 const syncThirdPartyProducts = async ({ forceRefresh = false } = {}) => {
   const data = await fetchThirdPartyProductAttributes({ forceRefresh });
   const filteredProducts = (data.products || []).filter((product) => {
     const name = String(product?.name || '').toLowerCase();
     return ALLOWED_PRODUCT_KEYWORDS.some((keyword) => name.includes(keyword));
   });
+
+  // Ensure categories exist in Category table so they appear in admin category management.
+  const uniqueCategorySlugs = [...new Set(filteredProducts.map((p) => getCategoryFromName(p.name)))];
+  const upsertedCategories = await Promise.all(
+    uniqueCategorySlugs.map(async (categorySlug, index) =>
+      Category.findOneAndUpdate(
+        { name: categorySlug },
+        {
+          $set: {
+            displayName: getCategoryDisplayName(categorySlug),
+            isActive: true,
+          },
+          $setOnInsert: {
+            name: categorySlug,
+            description: `Auto-created from third-party sync for ${getCategoryDisplayName(categorySlug)}`,
+            order: 100 + index,
+          },
+        },
+        { upsert: true, new: true }
+      )
+    )
+  );
 
   const upsertedProducts = await Promise.all(
     filteredProducts.map(async (tpProduct) => {
@@ -72,6 +104,7 @@ const syncThirdPartyProducts = async ({ forceRefresh = false } = {}) => {
   return {
     raw: data.raw,
     filteredProducts,
+    categoriesSynced: upsertedCategories.length,
     syncedCount: upsertedProducts.length,
   };
 };
@@ -113,12 +146,13 @@ router.get('/auth/token', protect, admin, async (req, res) => {
 router.get('/products/attributes', async (req, res) => {
   try {
     const forceRefresh = String(req.query.forceRefresh || '').toLowerCase() === 'true';
-    const { raw, filteredProducts, syncedCount } = await syncThirdPartyProducts({ forceRefresh });
+    const { raw, filteredProducts, categoriesSynced, syncedCount } = await syncThirdPartyProducts({ forceRefresh });
 
     res.json({
       success: true,
       result: raw,
       products: filteredProducts,
+      categoriesSynced,
       syncedCount,
     });
   } catch (error) {
@@ -132,11 +166,12 @@ router.get('/products/attributes', async (req, res) => {
 router.post('/products/sync', protect, admin, async (req, res) => {
   try {
     const forceRefresh = String(req.query.forceRefresh || '').toLowerCase() === 'true';
-    const { filteredProducts, syncedCount } = await syncThirdPartyProducts({ forceRefresh });
+    const { filteredProducts, categoriesSynced, syncedCount } = await syncThirdPartyProducts({ forceRefresh });
     res.json({
       success: true,
       message: 'Third-party products synced successfully',
       products: filteredProducts,
+      categoriesSynced,
       syncedCount,
     });
   } catch (error) {
