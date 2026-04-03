@@ -62,4 +62,39 @@ router.get('/:id', protect, async (req, res) => {
   }
 });
 
+// @route   GET /api/orders/track/:trackingNumber
+// @desc    Public tracking lookup by tracking number
+// @access  Public
+router.get('/track/:trackingNumber', async (req, res) => {
+  try {
+    const { trackingNumber } = req.params;
+    const order = await Order.findOne({ trackingNumber })
+      .populate('items.product', 'name productImage images');
+
+    if (!order) {
+      return res.status(404).json({ message: 'Tracking number not found' });
+    }
+
+    // Return safe subset for public tracking
+    res.json({
+      trackingNumber: order.trackingNumber,
+      status: order.status,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+      items: (order.items || []).map((it) => ({
+        productName: it.product?.name || 'Product',
+        quantity: it.quantity,
+        price: it.price,
+        imageUrl: it.product?.productImage?.url || it.product?.images?.[0]?.url || null,
+      })),
+      shippingAddress: order.shippingAddress ? {
+        city: order.shippingAddress.city,
+        country: order.shippingAddress.country,
+      } : null,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 export default router;

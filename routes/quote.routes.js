@@ -64,6 +64,25 @@ router.get('/', protect, admin, async (req, res) => {
   }
 });
 
+// @route   GET /api/quotes/my
+// @desc    Get quotes created by the authenticated user's email
+// @access  Private
+router.get('/my', protect, async (req, res) => {
+  try {
+    const email = req.user.email;
+    if (!email) {
+      return res.status(400).json({ message: 'User email not found' });
+    }
+
+    const quotes = await Quote.find({ email })
+      .sort({ createdAt: -1 });
+
+    res.json(quotes);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // @route   GET /api/quotes/:id
 // @desc    Get single quote
 // @access  Private/Admin
