@@ -5,6 +5,7 @@ import Category from '../models/Category.js';
 import {
   fetchThirdPartyProductAttributes,
   fetchThirdPartyProductAttributesByName,
+  fetchThirdPartyExpectedDeliveryDate,
   fetchThirdPartyProductPrices,
   getThirdPartyToken,
 } from '../services/thirdPartyAuth.service.js';
@@ -213,6 +214,43 @@ router.post('/products/prices', async (req, res) => {
       success: true,
       result: data.raw,
       prices: data.prices,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route   POST /api/third-party/products/expected-delivery-date
+// @desc    Fetch expected delivery date based on product + production payload
+// @access  Public (safe proxy response)
+router.post('/products/expected-delivery-date', async (req, res) => {
+  try {
+    const forceRefresh = String(req.query.forceRefresh || '').toLowerCase() === 'true';
+    const {
+      productId,
+      productionData,
+      serviceLevel,
+      quantity,
+      artworkService,
+      deliveryAddress,
+    } = req.body || {};
+
+    const data = await fetchThirdPartyExpectedDeliveryDate(
+      {
+        productId,
+        productionData,
+        serviceLevel,
+        quantity,
+        artworkService,
+        deliveryAddress,
+      },
+      { forceRefresh }
+    );
+
+    res.json({
+      success: true,
+      result: data.raw,
+      expectedDeliveryDate: data.expectedDeliveryDate,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

@@ -258,3 +258,71 @@ export const fetchThirdPartyProductPrices = async (
     prices,
   };
 };
+
+export const fetchThirdPartyExpectedDeliveryDate = async (
+  {
+    productId,
+    productionData,
+    serviceLevel,
+    quantity,
+    artworkService,
+    deliveryAddress,
+  },
+  { forceRefresh = false } = {}
+) => {
+  if (!productId) {
+    throw new Error('productId is required');
+  }
+  if (!productionData || typeof productionData !== 'object') {
+    throw new Error('productionData is required');
+  }
+
+  const { baseUrl } = getAuthConfig();
+  let token = await getThirdPartyToken({ forceRefresh });
+  const endpoint = `${baseUrl}/v2/products/expectedDeliveryDate`;
+
+  const body = {
+    productId,
+    productionData,
+    serviceLevel,
+    quantity,
+    artworkService,
+    deliveryAddress,
+  };
+
+  const callApi = async (authToken) => {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => ({}));
+    return { response, payload };
+  };
+
+  let { response, payload } = await callApi(token);
+
+  if (response.status === 401) {
+    token = await getThirdPartyToken({ forceRefresh: true });
+    ({ response, payload } = await callApi(token));
+  }
+
+  if (!response.ok) {
+    const message = payload?.message || payload?.error || `Failed to fetch expected delivery date (${response.status})`;
+    throw new Error(message);
+  }
+
+  const result = payload?.result || payload?.data || payload || {};
+  return {
+    success: payload?.success !== false,
+    raw: result,
+    expectedDeliveryDate:
+      result?.expectedDeliveryDate ||
+      result?.deliveryDate ||
+      result?.date ||
+      null,
+  };
+};

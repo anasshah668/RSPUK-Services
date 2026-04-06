@@ -68,6 +68,22 @@ THIRD_PARTY_USERNAME=your-username
 THIRD_PARTY_PASSWORD=your-password
 # Optional fallback TTL when API response doesn't include expiry
 THIRD_PARTY_TOKEN_TTL_SECONDS=3000
+
+# Worldpay (Production-ready Access integration)
+# Checkout ID for Access Checkout hosted fields
+WORLDPAY_CHECKOUT_ID=your-access-checkout-id
+# Service key from Worldpay Access dashboard (API credentials)
+WORLDPAY_SERVICE_KEY=your-worldpay-service-key
+# Merchant/entity name configured in your Worldpay account
+WORLDPAY_ENTITY=your-merchant-entity
+# Optional: default is https://access.worldpay.com
+WORLDPAY_API_BASE_URL=https://access.worldpay.com
+# Optional: default is /payments/authorizations
+WORLDPAY_AUTHORIZATION_PATH=/payments/authorizations
+# Optional: default is 2024-06-01
+WORLDPAY_API_VERSION=2024-06-01
+# Optional auth scheme: Bearer (default) or raw
+WORLDPAY_AUTH_SCHEME=Bearer
 ```
 
 ### 3. Start MongoDB
