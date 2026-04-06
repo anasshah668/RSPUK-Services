@@ -6,6 +6,7 @@ import {
   fetchThirdPartyProductAttributes,
   fetchThirdPartyProductAttributesByName,
   fetchThirdPartyExpectedDeliveryDate,
+  fetchThirdPartyQuantities,
   fetchThirdPartyProductPrices,
   getThirdPartyToken,
 } from '../services/thirdPartyAuth.service.js';
@@ -251,6 +252,29 @@ router.post('/products/expected-delivery-date', async (req, res) => {
       success: true,
       result: data.raw,
       expectedDeliveryDate: data.expectedDeliveryDate,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route   POST /api/third-party/products/quantities
+// @desc    Fetch available quantities for a product based on production data and service level
+// @access  Public (safe proxy response)
+router.post('/products/quantities', async (req, res) => {
+  try {
+    const forceRefresh = String(req.query.forceRefresh || '').toLowerCase() === 'true';
+    const { productId, serviceLevel, productionData } = req.body || {};
+
+    const data = await fetchThirdPartyQuantities(
+      { productId, serviceLevel, productionData },
+      { forceRefresh }
+    );
+
+    res.json({
+      success: true,
+      result: data.raw,
+      quantities: data.quantities,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

@@ -326,3 +326,56 @@ export const fetchThirdPartyExpectedDeliveryDate = async (
       null,
   };
 };
+
+export const fetchThirdPartyQuantities = async (
+  {
+    productId,
+    serviceLevel,
+    productionData,
+  },
+  { forceRefresh = false } = {}
+) => {
+  if (!productId) {
+    throw new Error('productId is required');
+  }
+  if (!productionData || typeof productionData !== 'object') {
+    throw new Error('productionData is required');
+  }
+  const { baseUrl } = getAuthConfig();
+  let token = await getThirdPartyToken({ forceRefresh });
+  const endpoint = `${baseUrl}/v2/products-v2/quantities-v2`;
+
+  const body = { productId, serviceLevel, productionData };
+
+  const callApi = async (authToken) => {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => ({}));
+    return { response, payload };
+  };
+
+  let { response, payload } = await callApi(token);
+
+  if (response.status === 401) {
+    token = await getThirdPartyToken({ forceRefresh: true });
+    ({ response, payload } = await callApi(token));
+  }
+
+  if (!response.ok) {
+    const message = payload?.message || payload?.error || `Failed to fetch product quantities (${response.status})`;
+    throw new Error(message);
+  }
+
+  const result = Array.isArray(payload?.result) ? payload.result : [];
+  return {
+    success: payload?.success !== false,
+    raw: result,
+    quantities: result.filter((n) => Number.isFinite(Number(n))).map((n) => Number(n)),
+  };
+};
