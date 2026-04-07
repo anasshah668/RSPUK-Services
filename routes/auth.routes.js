@@ -308,6 +308,7 @@ router.get('/me', protect, async (req, res) => {
       role: user.role,
       avatar: user.avatar,
       phone: user.phone,
+      address: user.address,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

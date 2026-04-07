@@ -60,6 +60,12 @@ const quoteSchema = new mongoose.Schema({
   adminResponse: {
     type: String,
   },
+  customerReply: {
+    type: String,
+  },
+  customerRepliedAt: {
+    type: Date,
+  },
   quotedPrice: {
     type: Number,
   },

@@ -124,6 +124,35 @@ router.put('/:id', protect, admin, async (req, res) => {
   }
 });
 
+// @route   PUT /api/quotes/:id/reply
+// @desc    Customer reply on their own quote
+// @access  Private
+router.put('/:id/reply', protect, async (req, res) => {
+  try {
+    const quote = await Quote.findById(req.params.id);
+    if (!quote) {
+      return res.status(404).json({ message: 'Quote not found' });
+    }
+
+    if (String(quote.email || '').toLowerCase() !== String(req.user.email || '').toLowerCase()) {
+      return res.status(403).json({ message: 'You can only reply to your own quotes' });
+    }
+
+    const reply = String(req.body?.customerReply || '').trim();
+    if (!reply) {
+      return res.status(400).json({ message: 'Reply message is required' });
+    }
+
+    quote.customerReply = reply;
+    quote.customerRepliedAt = new Date();
+    await quote.save();
+
+    return res.json(quote);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 // @route   POST /api/quotes/:id/send-email
 // @desc    Send quotation email to customer (admin only)
 // @access  Private/Admin
