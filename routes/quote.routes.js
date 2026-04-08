@@ -23,6 +23,12 @@ router.post('/', upload.single('artwork'), [
     }
 
     const payload = { ...req.body };
+    const initialMessage = String(req.body?.message || '').trim();
+    if (initialMessage) {
+      payload.conversation = [
+        { sender: 'customer', message: initialMessage, sentAt: new Date() },
+      ];
+    }
 
     if (req.file?.buffer) {
       const uploadedArtwork = await uploadToCloudinary(req.file.buffer, 'printing-platform/quotes');
@@ -112,7 +118,16 @@ router.put('/:id', protect, admin, async (req, res) => {
     }
 
     quote.status = req.body.status || quote.status;
-    quote.adminResponse = req.body.adminResponse || quote.adminResponse;
+    const incomingAdminResponse = String(req.body.adminResponse || '').trim();
+    if (incomingAdminResponse && incomingAdminResponse !== String(quote.adminResponse || '').trim()) {
+      quote.conversation = quote.conversation || [];
+      quote.conversation.push({
+        sender: 'admin',
+        message: incomingAdminResponse,
+        sentAt: new Date(),
+      });
+    }
+    quote.adminResponse = incomingAdminResponse || quote.adminResponse;
     quote.quotedPrice = req.body.quotedPrice || quote.quotedPrice;
     quote.respondedBy = req.user._id;
     quote.respondedAt = new Date();
@@ -145,6 +160,12 @@ router.put('/:id/reply', protect, async (req, res) => {
 
     quote.customerReply = reply;
     quote.customerRepliedAt = new Date();
+    quote.conversation = quote.conversation || [];
+    quote.conversation.push({
+      sender: 'customer',
+      message: reply,
+      sentAt: quote.customerRepliedAt,
+    });
     await quote.save();
 
     return res.json(quote);
@@ -324,6 +345,14 @@ router.post('/:id/send-email', protect, admin, async (req, res) => {
     });
 
     quote.status = req.body?.status || quote.status || 'quoted';
+    if (responseText && responseText !== String(quote.adminResponse || '').trim()) {
+      quote.conversation = quote.conversation || [];
+      quote.conversation.push({
+        sender: 'admin',
+        message: responseText,
+        sentAt: new Date(),
+      });
+    }
     quote.adminResponse = responseText || quote.adminResponse;
     quote.quotedPrice = quotedPrice !== undefined && quotedPrice !== null && quotedPrice !== '' ? Number(quotedPrice) : quote.quotedPrice;
     quote.respondedBy = req.user._id;

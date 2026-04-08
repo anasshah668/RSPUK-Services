@@ -29,9 +29,15 @@ router.post('/worldpay/checkout-session', async (req, res) => {
     }
 
     const authHeader = getWorldpayAuthHeader();
+    const checkoutId = String(process.env.WORLDPAY_CHECKOUT_ID || '').trim();
     if (!authHeader) {
       return res.status(500).json({
         message: 'Worldpay is not configured. Set WORLDPAY_USERNAME and WORLDPAY_PASSWORD.',
+      });
+    }
+    if (!checkoutId) {
+      return res.status(500).json({
+        message: 'Worldpay checkout is not configured. Set WORLDPAY_CHECKOUT_ID.',
       });
     }
 
@@ -39,6 +45,7 @@ router.post('/worldpay/checkout-session', async (req, res) => {
     const isLive = ['live', 'prod', 'production'].includes(environment);
 
     res.json({
+      checkoutId,
       currency,
       amount: Number(amount),
       environment: isLive ? 'live' : 'try',

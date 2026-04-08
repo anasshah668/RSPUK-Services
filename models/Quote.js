@@ -66,6 +66,24 @@ const quoteSchema = new mongoose.Schema({
   customerRepliedAt: {
     type: Date,
   },
+  conversation: [
+    {
+      sender: {
+        type: String,
+        enum: ['customer', 'admin'],
+        required: true,
+      },
+      message: {
+        type: String,
+        required: true,
+        trim: true,
+      },
+      sentAt: {
+        type: Date,
+        default: Date.now,
+      },
+    },
+  ],
   quotedPrice: {
     type: Number,
   },
