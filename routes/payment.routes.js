@@ -10,10 +10,11 @@ const toMinorUnits = (amount) => {
 };
 
 const getWorldpayAuthHeader = () => {
-  const key = process.env.WORLDPAY_SERVICE_KEY;
-  const scheme = (process.env.WORLDPAY_AUTH_SCHEME || 'Bearer').trim();
-  if (!key) return null;
-  return scheme.toLowerCase() === 'raw' ? key : `${scheme} ${key}`;
+  const username = process.env.WORLDPAY_USERNAME;
+  const password = process.env.WORLDPAY_PASSWORD;
+  if (!username || !password) return null;
+  const token = Buffer.from(`${username}:${password}`).toString('base64');
+  return `Basic ${token}`;
 };
 
 // @route   POST /api/payments/worldpay/checkout-session
@@ -27,19 +28,23 @@ router.post('/worldpay/checkout-session', async (req, res) => {
       return res.status(400).json({ message: 'Valid amount is required' });
     }
 
-    const checkoutId = process.env.WORLDPAY_CHECKOUT_ID;
     const authHeader = getWorldpayAuthHeader();
-    if (!checkoutId || !authHeader) {
+    if (!authHeader) {
       return res.status(500).json({
-        message: 'Worldpay is not configured. Set WORLDPAY_CHECKOUT_ID and WORLDPAY_SERVICE_KEY.',
+        message: 'Worldpay is not configured. Set WORLDPAY_USERNAME and WORLDPAY_PASSWORD.',
       });
     }
 
+    const environment = String(process.env.WORLDPAY_ENVIRONMENT || 'try').toLowerCase();
+    const isLive = ['live', 'prod', 'production'].includes(environment);
+
     res.json({
-      checkoutId,
       currency,
       amount: Number(amount),
-      environment: process.env.WORLDPAY_ENVIRONMENT || 'try',
+      environment: isLive ? 'live' : 'try',
+      scriptUrl: isLive
+        ? 'https://access.worldpay.com/access-checkout/v2/checkout.js'
+        : 'https://try.access.worldpay.com/access-checkout/v2/checkout.js',
     });
   } catch (error) {
     res.status(500).json({ message: error.message || 'Failed to create Worldpay session' });
@@ -77,7 +82,7 @@ router.post('/worldpay/charge', async (req, res) => {
 
     if (!authHeader || !entity) {
       return res.status(500).json({
-        message: 'Worldpay is not configured. Set WORLDPAY_SERVICE_KEY and WORLDPAY_ENTITY.',
+        message: 'Worldpay is not configured. Set WORLDPAY_USERNAME, WORLDPAY_PASSWORD and WORLDPAY_ENTITY.',
       });
     }
 
@@ -129,6 +134,15 @@ router.post('/worldpay/charge', async (req, res) => {
     if (!worldpayResponse.ok) {
       return res.status(worldpayResponse.status).json({
         message: data?.message || 'Worldpay authorization failed',
+        details: data,
+      });
+    }
+
+    const outcome = String(data?.outcome || data?.paymentStatus || '').toLowerCase();
+    const approvedOutcomes = new Set(['authorized', 'sentforsettlement', 'sent_for_settlement', 'paid', 'charged']);
+    if (outcome && !approvedOutcomes.has(outcome)) {
+      return res.status(402).json({
+        message: data?.message || `Payment was not approved (${outcome})`,
         details: data,
       });
     }
