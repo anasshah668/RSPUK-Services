@@ -3,11 +3,10 @@ import mongoose from 'mongoose';
 const neonPricingSettingsSchema = new mongoose.Schema(
   {
     currency: { type: String, default: 'GBP' },
-    minimumPrice: { type: Number, default: 10 },
-    basePrice: { type: Number, default: 59 },
-    widthCmRate: { type: Number, default: 0.9 },
-    heightCmRate: { type: Number, default: 1.2 },
-    outdoorAddon: { type: Number, default: 25 },
+    basePrice: { type: Number, default: 0 },
+    widthCmRate: { type: Number, default: 0 },
+    heightCmRate: { type: Number, default: 0 },
+    outdoorAddon: { type: Number, default: 0 },
     jacketColouredAddon: { type: Number, default: 0 },
     jacketWhiteAddon: { type: Number, default: 0 },
     tubeClassicAddon: { type: Number, default: 0 },

@@ -22,7 +22,6 @@ export const updateNeonPricingSettings = async (req, res) => {
   try {
     const allowed = [
       'currency',
-      'minimumPrice',
       'basePrice',
       'widthCmRate',
       'heightCmRate',
