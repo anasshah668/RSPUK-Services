@@ -13,6 +13,7 @@ import categoryRoutes from './routes/category.routes.js';
 import settingsRoutes from './routes/settings.routes.js';
 import thirdPartyRoutes from './routes/thirdParty.routes.js';
 import paymentRoutes from './routes/payment.routes.js';
+import neonPricingRoutes from './routes/neonPricing.routes.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
 dotenv.config();
@@ -44,6 +45,7 @@ app.use('/api/categories', categoryRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/third-party', thirdPartyRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/neon-pricing', neonPricingRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

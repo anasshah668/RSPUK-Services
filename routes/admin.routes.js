@@ -3,6 +3,7 @@ import Product from '../models/Product.js';
 import Order from '../models/Order.js';
 import Quote from '../models/Quote.js';
 import User from '../models/User.js';
+import { getNeonPricingSettings, updateNeonPricingSettings } from '../controllers/neonPricing.controller.js';
 import { protect, admin } from '../middleware/auth.js';
 import { upload, uploadMultipleToCloudinary } from '../config/cloudinary.js';
 
@@ -259,6 +260,11 @@ router.put('/orders/:id/status', async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 });
+
+// ==================== NEON PRICING ====================
+
+router.get('/neon-pricing', getNeonPricingSettings);
+router.put('/neon-pricing', updateNeonPricingSettings);
 
 // ==================== ANALYTICS ====================
 
