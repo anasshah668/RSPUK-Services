@@ -66,6 +66,31 @@ const getWorldpayAuthHeader = (profile = getWorldpayProfile()) => {
   return null;
 };
 
+/**
+ * POST /payments/authorizations is the Card Payments API — it expects vendor media types, not application/json.
+ * Use WORLDPAY_AUTH_API=json only if you point WORLDPAY_AUTHORIZATION_PATH at an orchestrated route that accepts JSON + WP-Api-Version.
+ */
+const getWorldpayAuthorizationRequestHeaders = (authHeader, idempotencyKey) => {
+  const apiStyle = trim(process.env.WORLDPAY_AUTH_API || 'card').toLowerCase();
+  if (apiStyle === 'json' || apiStyle === 'orchestrated') {
+    const apiVersion = trim(process.env.WORLDPAY_API_VERSION || '2024-06-01');
+    return {
+      Authorization: authHeader,
+      'Content-Type': 'application/json',
+      'WP-Api-Version': apiVersion,
+      'Idempotency-Key': idempotencyKey,
+    };
+  }
+  const version = trim(process.env.WORLDPAY_CARD_PAYMENTS_VERSION || '7');
+  const mediaRoot = `application/vnd.worldpay.payments-v${version}`;
+  return {
+    Authorization: authHeader,
+    'Content-Type': `${mediaRoot}+json`,
+    Accept: `${mediaRoot}.hal+json`,
+    'Idempotency-Key': idempotencyKey,
+  };
+};
+
 // @route   POST /api/payments/worldpay/checkout-session
 // @desc    Provide Worldpay checkout configuration for hosted fields
 // @access  Public
@@ -135,7 +160,6 @@ router.post('/worldpay/charge', async (req, res) => {
     const authHeader = getWorldpayAuthHeader(profile);
     const apiBase = getWorldpayApiBaseUrl();
     const authPath = process.env.WORLDPAY_AUTHORIZATION_PATH || '/payments/authorizations';
-    const apiVersion = process.env.WORLDPAY_API_VERSION || '2024-06-01';
     const entity = profile.entity;
 
     if (!authHeader || !entity) {
@@ -148,37 +172,46 @@ router.post('/worldpay/charge', async (req, res) => {
     const transactionReference = orderReference || `NEON-${Date.now()}`;
     const idempotencyKey = crypto.randomUUID();
 
+    const statementLine1 = (trim(process.env.WORLDPAY_STATEMENT_LINE1) || 'Card payment').slice(0, 24);
+
+    const addr1 = billingAddress.address1 || billingAddress.street || customerInfo.address;
     const worldpayBody = {
       transactionReference,
+      channel: 'ecom',
       merchant: { entity },
       instruction: {
-        value: minorUnits,
-        currency,
-      },
-      paymentInstrument: {
-        type: 'card/front',
-        sessionState,
-      },
-      customer: {
-        email: customerInfo.email || undefined,
-        firstName: customerInfo.name || undefined,
-      },
-      billingAddress: {
-        address1: billingAddress.address1 || billingAddress.street || customerInfo.address || undefined,
-        postalCode: billingAddress.postalCode || undefined,
-        city: billingAddress.city || undefined,
-        countryCode: billingAddress.countryCode || 'GB',
+        narrative: {
+          line1: statementLine1,
+        },
+        value: {
+          currency,
+          amount: minorUnits,
+        },
+        paymentInstrument: {
+          type: 'card/front',
+          sessionState,
+        },
       },
     };
 
+    if (customerInfo.email) {
+      worldpayBody.customer = {
+        email: customerInfo.email,
+        ...(customerInfo.name ? { firstName: String(customerInfo.name).split(/\s+/)[0] } : {}),
+      };
+    }
+    if (addr1 || billingAddress.postalCode || billingAddress.city) {
+      worldpayBody.billingAddress = {
+        ...(addr1 ? { address1: addr1 } : {}),
+        ...(billingAddress.postalCode ? { postalCode: billingAddress.postalCode } : {}),
+        ...(billingAddress.city ? { city: billingAddress.city } : {}),
+        countryCode: billingAddress.countryCode || 'GB',
+      };
+    }
+
     const worldpayResponse = await fetch(`${apiBase}${authPath}`, {
       method: 'POST',
-      headers: {
-        Authorization: authHeader,
-        'Content-Type': 'application/json',
-        'WP-Api-Version': apiVersion,
-        'Idempotency-Key': idempotencyKey,
-      },
+      headers: getWorldpayAuthorizationRequestHeaders(authHeader, idempotencyKey),
       body: JSON.stringify(worldpayBody),
     });
 
