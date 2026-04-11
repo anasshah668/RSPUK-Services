@@ -3,18 +3,67 @@ import crypto from 'crypto';
 
 const router = express.Router();
 
+const trim = (value) => String(value ?? '').trim();
+
 const toMinorUnits = (amount) => {
   const value = Number(amount);
   if (!Number.isFinite(value) || value <= 0) return null;
   return Math.round(value * 100);
 };
 
-const getWorldpayAuthHeader = () => {
-  const username = process.env.WORLDPAY_USERNAME;
-  const password = process.env.WORLDPAY_PASSWORD;
-  if (!username || !password) return null;
-  const token = Buffer.from(`${username}:${password}`).toString('base64');
-  return `Basic ${token}`;
+/** `try` | `live` — also accepts WORLDPAY_MODE. Flip this when you go live; hosts and credentials follow. */
+const getWorldpayEnvironmentFlags = () => {
+  const environment = trim(process.env.WORLDPAY_ENVIRONMENT || process.env.WORLDPAY_MODE || 'try').toLowerCase();
+  const isLive = ['live', 'prod', 'production'].includes(environment);
+  return { environment, isLive };
+};
+
+/**
+ * Active credential set: WORLDPAY_TRY_* / WORLDPAY_LIVE_* per environment, with fallback to plain WORLDPAY_* (single .env).
+ */
+const getWorldpayProfile = () => {
+  const { isLive } = getWorldpayEnvironmentFlags();
+  const tag = isLive ? 'LIVE' : 'TRY';
+  const pick = (suffix) => trim(process.env[`WORLDPAY_${tag}_${suffix}`]) || trim(process.env[`WORLDPAY_${suffix}`]);
+
+  const username = pick('USERNAME');
+  const password = pick('PASSWORD');
+  const serviceKey = pick('SERVICE_KEY');
+
+  return {
+    checkoutId: pick('CHECKOUT_ID'),
+    username,
+    password,
+    serviceKey,
+    entity: pick('ENTITY') || (!isLive ? 'default' : ''),
+  };
+};
+
+/** Try and Live use different hosts — mixing them with the wrong credentials returns 401 accessDenied. */
+const getWorldpayApiBaseUrl = () => {
+  const explicit = trim(process.env.WORLDPAY_API_BASE_URL);
+  if (explicit) return explicit.replace(/\/+$/, '');
+  const { isLive } = getWorldpayEnvironmentFlags();
+  return isLive ? 'https://access.worldpay.com' : 'https://try.access.worldpay.com';
+};
+
+/**
+ * Basic: username + (password or serviceKey). Bearer: WORLDPAY_AUTH_SCHEME=Bearer and a service key in the active profile.
+ */
+const getWorldpayAuthHeader = (profile = getWorldpayProfile()) => {
+  const scheme = trim(process.env.WORLDPAY_AUTH_SCHEME).toLowerCase();
+
+  if (scheme === 'bearer' && profile.serviceKey) {
+    return `Bearer ${profile.serviceKey}`;
+  }
+
+  const basicPassword = profile.password || profile.serviceKey;
+  if (profile.username && basicPassword) {
+    const token = Buffer.from(`${profile.username}:${basicPassword}`).toString('base64');
+    return `Basic ${token}`;
+  }
+
+  return null;
 };
 
 // @route   POST /api/payments/worldpay/checkout-session
@@ -28,21 +77,22 @@ router.post('/worldpay/checkout-session', async (req, res) => {
       return res.status(400).json({ message: 'Valid amount is required' });
     }
 
-    const authHeader = getWorldpayAuthHeader();
-    const checkoutId = String(process.env.WORLDPAY_CHECKOUT_ID || '').trim();
+    const profile = getWorldpayProfile();
+    const authHeader = getWorldpayAuthHeader(profile);
+    const checkoutId = profile.checkoutId;
     if (!authHeader) {
       return res.status(500).json({
-        message: 'Worldpay is not configured. Set WORLDPAY_USERNAME and WORLDPAY_PASSWORD.',
+        message:
+          'Worldpay is not configured. Set TRY/LIVE username + password (or SERVICE_KEY) in .env — see README.',
       });
     }
     if (!checkoutId) {
       return res.status(500).json({
-        message: 'Worldpay checkout is not configured. Set WORLDPAY_CHECKOUT_ID.',
+        message: 'Worldpay checkout is not configured. Set WORLDPAY_TRY_CHECKOUT_ID / WORLDPAY_LIVE_CHECKOUT_ID (or WORLDPAY_CHECKOUT_ID).',
       });
     }
 
-    const environment = String(process.env.WORLDPAY_ENVIRONMENT || 'try').toLowerCase();
-    const isLive = ['live', 'prod', 'production'].includes(environment);
+    const { isLive } = getWorldpayEnvironmentFlags();
 
     res.json({
       checkoutId,
@@ -81,15 +131,17 @@ router.post('/worldpay/charge', async (req, res) => {
       return res.status(400).json({ message: 'Valid amount is required' });
     }
 
-    const authHeader = getWorldpayAuthHeader();
-    const apiBase = (process.env.WORLDPAY_API_BASE_URL || 'https://access.worldpay.com').replace(/\/+$/, '');
+    const profile = getWorldpayProfile();
+    const authHeader = getWorldpayAuthHeader(profile);
+    const apiBase = getWorldpayApiBaseUrl();
     const authPath = process.env.WORLDPAY_AUTHORIZATION_PATH || '/payments/authorizations';
     const apiVersion = process.env.WORLDPAY_API_VERSION || '2024-06-01';
-    const entity = process.env.WORLDPAY_ENTITY;
+    const entity = profile.entity;
 
     if (!authHeader || !entity) {
       return res.status(500).json({
-        message: 'Worldpay is not configured. Set WORLDPAY_USERNAME, WORLDPAY_PASSWORD and WORLDPAY_ENTITY.',
+        message:
+          'Worldpay is not configured. Set username, password (or service key), and entity for the active environment (WORLDPAY_TRY_* / WORLDPAY_LIVE_*).',
       });
     }
 

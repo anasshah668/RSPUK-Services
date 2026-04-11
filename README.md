@@ -69,21 +69,37 @@ THIRD_PARTY_PASSWORD=your-password
 # Optional fallback TTL when API response doesn't include expiry
 THIRD_PARTY_TOKEN_TTL_SECONDS=3000
 
-# Worldpay (Production-ready Access integration)
-# Checkout ID for Access Checkout hosted fields
-WORLDPAY_CHECKOUT_ID=your-access-checkout-id
-# Service key from Worldpay Access dashboard (API credentials)
-WORLDPAY_SERVICE_KEY=your-worldpay-service-key
-# Merchant/entity name configured in your Worldpay account
-WORLDPAY_ENTITY=your-merchant-entity
-# Optional: default is https://access.worldpay.com
-WORLDPAY_API_BASE_URL=https://access.worldpay.com
-# Optional: default is /payments/authorizations
-WORLDPAY_AUTHORIZATION_PATH=/payments/authorizations
-# Optional: default is 2024-06-01
-WORLDPAY_API_VERSION=2024-06-01
-# Optional auth scheme: Bearer (default) or raw
-WORLDPAY_AUTH_SCHEME=Bearer
+# Worldpay — copy `backend/.env.worldpay.example` into `.env` and fill values.
+# Fill BOTH blocks once; to go live only change WORLDPAY_ENVIRONMENT to live
+# (or set WORLDPAY_MODE=live). API host and checkout script follow automatically.
+WORLDPAY_ENVIRONMENT=try
+
+# Sandbox (Try)
+WORLDPAY_TRY_CHECKOUT_ID=your-try-checkout-id
+WORLDPAY_TRY_USERNAME=your-try-api-username
+WORLDPAY_TRY_PASSWORD=your-try-api-password
+WORLDPAY_TRY_ENTITY=default
+
+# Production (Live) — same shape; used when WORLDPAY_ENVIRONMENT=live
+WORLDPAY_LIVE_CHECKOUT_ID=your-live-checkout-id
+WORLDPAY_LIVE_USERNAME=your-live-api-username
+WORLDPAY_LIVE_PASSWORD=your-live-api-password
+WORLDPAY_LIVE_ENTITY=your-live-entity
+
+# Optional: use SERVICE_KEY instead of PASSWORD for Basic (or for Bearer — see below)
+# WORLDPAY_TRY_SERVICE_KEY=
+# WORLDPAY_LIVE_SERVICE_KEY=
+
+# Optional: override API host (otherwise try → try.access.worldpay.com, live → access.worldpay.com)
+# WORLDPAY_API_BASE_URL=https://try.access.worldpay.com
+# WORLDPAY_AUTHORIZATION_PATH=/payments/authorizations
+# WORLDPAY_API_VERSION=2024-06-01
+
+# Legacy single-profile vars still work if you omit TRY_/LIVE_ (not recommended for prod cutover):
+# WORLDPAY_CHECKOUT_ID=  WORLDPAY_USERNAME=  WORLDPAY_PASSWORD=  WORLDPAY_ENTITY=
+
+# Bearer only if Worldpay docs require it (uses *_SERVICE_KEY from the active profile)
+# WORLDPAY_AUTH_SCHEME=Bearer
 ```
 
 ### 3. Start MongoDB
