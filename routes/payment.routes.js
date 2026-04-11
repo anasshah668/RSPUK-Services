@@ -67,10 +67,19 @@ const getWorldpayAuthHeader = (profile = getWorldpayProfile()) => {
 };
 
 /**
- * POST /payments/authorizations is the Card Payments API — it expects vendor media types, not application/json.
- * Use WORLDPAY_AUTH_API=json only if you point WORLDPAY_AUTHORIZATION_PATH at an orchestrated route that accepts JSON + WP-Api-Version.
+ * POST /payments/authorizations = Card Payments API v6 (OpenAPI). v7 moved to /cardPayments/customerInitiatedTransactions.
+ * Wrong version on the path returns 415 Bad content type.
  */
-const getWorldpayAuthorizationRequestHeaders = (authHeader, idempotencyKey) => {
+const inferCardPaymentsMediaVersion = (authPath) => {
+  const path = String(authPath || '');
+  if (path.includes('customerInitiatedTransactions')) return '7';
+  return '6';
+};
+
+/**
+ * Use WORLDPAY_AUTH_API=json only for orchestrated URLs (e.g. /api/payments) that accept application/json + WP-Api-Version.
+ */
+const getWorldpayAuthorizationRequestHeaders = (authHeader, idempotencyKey, authPath) => {
   const apiStyle = trim(process.env.WORLDPAY_AUTH_API || 'card').toLowerCase();
   if (apiStyle === 'json' || apiStyle === 'orchestrated') {
     const apiVersion = trim(process.env.WORLDPAY_API_VERSION || '2024-06-01');
@@ -81,7 +90,13 @@ const getWorldpayAuthorizationRequestHeaders = (authHeader, idempotencyKey) => {
       'Idempotency-Key': idempotencyKey,
     };
   }
-  const version = trim(process.env.WORLDPAY_CARD_PAYMENTS_VERSION || '7');
+  let version = trim(process.env.WORLDPAY_CARD_PAYMENTS_VERSION) || inferCardPaymentsMediaVersion(authPath);
+  const path = String(authPath || '');
+  if (path.includes('customerInitiatedTransactions')) {
+    if (version === '6') version = '7';
+  } else if (version === '7') {
+    version = '6';
+  }
   const mediaRoot = `application/vnd.worldpay.payments-v${version}`;
   return {
     Authorization: authHeader,
@@ -159,8 +174,9 @@ router.post('/worldpay/charge', async (req, res) => {
     const profile = getWorldpayProfile();
     const authHeader = getWorldpayAuthHeader(profile);
     const apiBase = getWorldpayApiBaseUrl();
-    const authPath = process.env.WORLDPAY_AUTHORIZATION_PATH || '/payments/authorizations';
+    const authPath = trim(process.env.WORLDPAY_AUTHORIZATION_PATH) || '/payments/authorizations';
     const entity = profile.entity;
+    const isV7CustomerInitiated = authPath.includes('customerInitiatedTransactions');
 
     if (!authHeader || !entity) {
       return res.status(500).json({
@@ -177,7 +193,7 @@ router.post('/worldpay/charge', async (req, res) => {
     const addr1 = billingAddress.address1 || billingAddress.street || customerInfo.address;
     const worldpayBody = {
       transactionReference,
-      channel: 'ecom',
+      ...(isV7CustomerInitiated ? { channel: 'ecom' } : {}),
       merchant: { entity },
       instruction: {
         narrative: {
@@ -211,7 +227,7 @@ router.post('/worldpay/charge', async (req, res) => {
 
     const worldpayResponse = await fetch(`${apiBase}${authPath}`, {
       method: 'POST',
-      headers: getWorldpayAuthorizationRequestHeaders(authHeader, idempotencyKey),
+      headers: getWorldpayAuthorizationRequestHeaders(authHeader, idempotencyKey, authPath),
       body: JSON.stringify(worldpayBody),
     });
 
