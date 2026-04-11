@@ -11,6 +11,35 @@ const toMinorUnits = (amount) => {
   return Math.round(value * 100);
 };
 
+/**
+ * Card Payments `/payments/authorizations` expects `card/checkout` + `sessionHref`.
+ * SDK often returns a full URL; sometimes a path or token — see WORLDPAY_CHECKOUT_SESSION_PATH_PREFIX (default verifiedTokens/sessions per Worldpay docs).
+ */
+const toWorldpayCheckoutSessionHref = (sessionInput, apiBase) => {
+  let raw = sessionInput;
+  if (raw != null && typeof raw === 'object') {
+    raw = raw.href || raw.sessionHref || raw.sessionState || raw.url || '';
+  }
+  raw = trim(String(raw || ''));
+  if (!raw) return '';
+  if (raw.startsWith('{') || raw.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        const inner = parsed.href || parsed.sessionHref || parsed.sessionState || parsed.url;
+        if (inner) raw = trim(String(inner));
+      }
+    } catch {
+      /* keep raw string */
+    }
+  }
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const base = apiBase.replace(/\/+$/, '');
+  if (raw.startsWith('/')) return `${base}${raw}`;
+  const prefix = trim(process.env.WORLDPAY_CHECKOUT_SESSION_PATH_PREFIX || 'verifiedTokens/sessions').replace(/^\/+|\/+$/g, '');
+  return `${base}/${prefix}/${raw}`;
+};
+
 /** `try` | `live` — also accepts WORLDPAY_MODE. Flip this when you go live; hosts and credentials follow. */
 const getWorldpayEnvironmentFlags = () => {
   const environment = trim(process.env.WORLDPAY_ENVIRONMENT || process.env.WORLDPAY_MODE || 'try').toLowerCase();
@@ -155,6 +184,7 @@ router.post('/worldpay/charge', async (req, res) => {
   try {
     const {
       sessionState,
+      sessionHref: sessionHrefFromBody,
       amount,
       currency = 'GBP',
       orderReference,
@@ -162,8 +192,9 @@ router.post('/worldpay/charge', async (req, res) => {
       billingAddress = {},
     } = req.body || {};
 
-    if (!sessionState) {
-      return res.status(400).json({ message: 'sessionState is required' });
+    const sessionInput = sessionHrefFromBody || sessionState;
+    if (!sessionInput) {
+      return res.status(400).json({ message: 'sessionState or sessionHref is required' });
     }
 
     const minorUnits = toMinorUnits(amount);
@@ -174,6 +205,11 @@ router.post('/worldpay/charge', async (req, res) => {
     const profile = getWorldpayProfile();
     const authHeader = getWorldpayAuthHeader(profile);
     const apiBase = getWorldpayApiBaseUrl();
+    const sessionHref = toWorldpayCheckoutSessionHref(sessionInput, apiBase);
+    if (!sessionHref) {
+      return res.status(400).json({ message: 'Invalid checkout session' });
+    }
+
     const authPath = trim(process.env.WORLDPAY_AUTHORIZATION_PATH) || '/payments/authorizations';
     const entity = profile.entity;
     const isV7CustomerInitiated = authPath.includes('customerInitiatedTransactions');
@@ -191,6 +227,7 @@ router.post('/worldpay/charge', async (req, res) => {
     const statementLine1 = (trim(process.env.WORLDPAY_STATEMENT_LINE1) || 'Card payment').slice(0, 24);
 
     const addr1 = billingAddress.address1 || billingAddress.street || customerInfo.address;
+    const cardHolderName = trim(customerInfo.name || '');
     const worldpayBody = {
       transactionReference,
       ...(isV7CustomerInitiated ? { channel: 'ecom' } : {}),
@@ -204,8 +241,9 @@ router.post('/worldpay/charge', async (req, res) => {
           amount: minorUnits,
         },
         paymentInstrument: {
-          type: 'card/front',
-          sessionState,
+          type: 'card/checkout',
+          sessionHref,
+          ...(cardHolderName ? { cardHolderName } : {}),
         },
       },
     };
