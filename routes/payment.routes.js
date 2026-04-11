@@ -12,8 +12,8 @@ const toMinorUnits = (amount) => {
 };
 
 /**
- * Card Payments `/payments/authorizations` expects `card/checkout` + `sessionHref`.
- * SDK often returns a full URL; sometimes a path or token — see WORLDPAY_CHECKOUT_SESSION_PATH_PREFIX (default verifiedTokens/sessions per Worldpay docs).
+ * Checkout session → one-time verified token → `/payments/authorizations` with `card/checkout` + `tokenHref`.
+ * Authorizations do not accept `sessionHref` alone for this flow.
  */
 const toWorldpayCheckoutSessionHref = (sessionInput, apiBase) => {
   let raw = sessionInput;
@@ -135,6 +135,92 @@ const getWorldpayAuthorizationRequestHeaders = (authHeader, idempotencyKey, auth
   };
 };
 
+const getVerifiedTokensMediaVersion = () => trim(process.env.WORLDPAY_VERIFIED_TOKENS_MEDIA_VERSION || '2');
+
+const getVerifiedTokensRequestHeaders = (authHeader, idempotencyKey) => {
+  const v = getVerifiedTokensMediaVersion();
+  const root = `application/vnd.worldpay.verified-tokens-v${v}`;
+  return {
+    Authorization: authHeader,
+    'Content-Type': `${root}.hal+json`,
+    Accept: `${root}.hal+json`,
+    'Idempotency-Key': idempotencyKey,
+  };
+};
+
+const extractTokenHrefFromVerifiedTokenResponse = (data) => {
+  if (!data || typeof data !== 'object') return '';
+  const link = data._links?.['tokens:token'];
+  return trim(link?.href || '');
+};
+
+/**
+ * Exchange Access Checkout session URL for a one-time token href (Card Payments then needs tokenHref).
+ */
+const createWorldpayOneTimeVerifiedToken = async ({
+  authHeader,
+  apiBase,
+  entity,
+  sessionHref,
+  currency,
+  cardHolderName,
+  paymentInstrumentExtras = {},
+}) => {
+  const path = trim(process.env.WORLDPAY_VERIFIED_TOKENS_PATH) || '/verifiedTokens/oneTime';
+  const idempotencyKey = crypto.randomUUID();
+  const holder = trim(cardHolderName) || 'Customer';
+  const body = {
+    description: (trim(process.env.WORLDPAY_TOKEN_DESCRIPTION) || 'One-time checkout payment').slice(0, 255),
+    paymentInstrument: {
+      type: 'card/checkout',
+      sessionHref,
+      cardHolderName: holder,
+      ...paymentInstrumentExtras,
+    },
+    merchant: { entity },
+    verificationCurrency: String(currency || 'GBP').toUpperCase().slice(0, 3),
+  };
+
+  const res = await fetch(`${apiBase}${path}`, {
+    method: 'POST',
+    headers: getVerifiedTokensRequestHeaders(authHeader, idempotencyKey),
+    body: JSON.stringify(body),
+  });
+
+  const text = await res.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { raw: text };
+  }
+
+  if (!res.ok) {
+    const err = new Error(data?.message || 'Worldpay verified token creation failed');
+    err.status = res.status;
+    err.details = data;
+    throw err;
+  }
+
+  const outcome = String(data?.outcome || '').toLowerCase();
+  if (outcome && outcome !== 'verified') {
+    const err = new Error(data?.message || `Card verification did not succeed (${data?.outcome || 'unknown'})`);
+    err.status = 402;
+    err.details = data;
+    throw err;
+  }
+
+  const tokenHref = extractTokenHrefFromVerifiedTokenResponse(data);
+  if (!tokenHref) {
+    const err = new Error('Worldpay did not return a token for this card session.');
+    err.status = 502;
+    err.details = data;
+    throw err;
+  }
+
+  return tokenHref;
+};
+
 // @route   POST /api/payments/worldpay/checkout-session
 // @desc    Provide Worldpay checkout configuration for hosted fields
 // @access  Public
@@ -185,6 +271,7 @@ router.post('/worldpay/charge', async (req, res) => {
     const {
       sessionState,
       sessionHref: sessionHrefFromBody,
+      tokenHref: tokenHrefFromBody,
       amount,
       currency = 'GBP',
       orderReference,
@@ -193,8 +280,10 @@ router.post('/worldpay/charge', async (req, res) => {
     } = req.body || {};
 
     const sessionInput = sessionHrefFromBody || sessionState;
-    if (!sessionInput) {
-      return res.status(400).json({ message: 'sessionState or sessionHref is required' });
+    if (!sessionInput && !trim(String(tokenHrefFromBody || ''))) {
+      return res.status(400).json({
+        message: 'sessionState or sessionHref is required (or pass tokenHref if you already created a verified token).',
+      });
     }
 
     const minorUnits = toMinorUnits(amount);
@@ -205,8 +294,8 @@ router.post('/worldpay/charge', async (req, res) => {
     const profile = getWorldpayProfile();
     const authHeader = getWorldpayAuthHeader(profile);
     const apiBase = getWorldpayApiBaseUrl();
-    const sessionHref = toWorldpayCheckoutSessionHref(sessionInput, apiBase);
-    if (!sessionHref) {
+    const sessionHref = sessionInput ? toWorldpayCheckoutSessionHref(sessionInput, apiBase) : '';
+    if (sessionInput && !sessionHref) {
       return res.status(400).json({ message: 'Invalid checkout session' });
     }
 
@@ -228,6 +317,37 @@ router.post('/worldpay/charge', async (req, res) => {
 
     const addr1 = billingAddress.address1 || billingAddress.street || customerInfo.address;
     const cardHolderName = trim(customerInfo.name || '');
+
+    let tokenHref = trim(String(tokenHrefFromBody || ''));
+    if (!tokenHref) {
+      const piExtras = {};
+      if (addr1) {
+        piExtras.billingAddress = {
+          address1: addr1,
+          ...(billingAddress.postalCode ? { postalCode: billingAddress.postalCode } : {}),
+          ...(billingAddress.city ? { city: billingAddress.city } : {}),
+          countryCode: billingAddress.countryCode || 'GB',
+        };
+      }
+      try {
+        tokenHref = await createWorldpayOneTimeVerifiedToken({
+          authHeader,
+          apiBase,
+          entity,
+          sessionHref,
+          currency,
+          cardHolderName,
+          paymentInstrumentExtras: piExtras,
+        });
+      } catch (e) {
+        const status = e.status && Number.isFinite(e.status) ? e.status : 502;
+        return res.status(status).json({
+          message: e.message || 'Worldpay verified token step failed',
+          details: e.details,
+        });
+      }
+    }
+
     const worldpayBody = {
       transactionReference,
       ...(isV7CustomerInitiated ? { channel: 'ecom' } : {}),
@@ -242,8 +362,7 @@ router.post('/worldpay/charge', async (req, res) => {
         },
         paymentInstrument: {
           type: 'card/checkout',
-          sessionHref,
-          ...(cardHolderName ? { cardHolderName } : {}),
+          tokenHref,
         },
       },
     };
