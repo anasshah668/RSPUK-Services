@@ -13,6 +13,7 @@ import categoryRoutes from './routes/category.routes.js';
 import settingsRoutes from './routes/settings.routes.js';
 import thirdPartyRoutes from './routes/thirdParty.routes.js';
 import paymentRoutes from './routes/payment.routes.js';
+import cartRoutes from './routes/cart.routes.js';
 import neonPricingRoutes from './routes/neonPricing.routes.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
@@ -45,6 +46,7 @@ app.use('/api/categories', categoryRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/third-party', thirdPartyRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/cart', cartRoutes);
 app.use('/api/neon-pricing', neonPricingRoutes);
 
 // Health check
@@ -57,6 +59,11 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+/** Vercel runs the app as a serverless function; `listen` is for local / long-running hosts only. */
+if (process.env.VERCEL !== '1') {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
+export default app;
