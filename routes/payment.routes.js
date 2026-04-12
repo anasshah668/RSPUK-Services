@@ -1,5 +1,7 @@
 import express from 'express';
 import crypto from 'crypto';
+import { recordCheckoutOrder } from '../services/checkoutOrdersStore.js';
+import { sendPaymentReceiptEmail } from '../services/receiptMail.js';
 
 const router = express.Router();
 
@@ -135,7 +137,8 @@ const getWorldpayAuthorizationRequestHeaders = (authHeader, idempotencyKey, auth
   };
 };
 
-const getVerifiedTokensMediaVersion = () => trim(process.env.WORLDPAY_VERIFIED_TOKENS_MEDIA_VERSION || '2');
+/** Worldpay docs use v3 for POST /verifiedTokens/oneTime; v2 may 415. Override with WORLDPAY_VERIFIED_TOKENS_MEDIA_VERSION=2 if your account still expects v2. */
+const getVerifiedTokensMediaVersion = () => trim(process.env.WORLDPAY_VERIFIED_TOKENS_MEDIA_VERSION || '3');
 
 const getVerifiedTokensRequestHeaders = (authHeader, idempotencyKey) => {
   const v = getVerifiedTokensMediaVersion();
@@ -148,10 +151,21 @@ const getVerifiedTokensRequestHeaders = (authHeader, idempotencyKey) => {
   };
 };
 
+/** v3: _embedded.token._links['tokens:token'].href or tokenPaymentInstrument.href; v2: _links['tokens:token'].href */
 const extractTokenHrefFromVerifiedTokenResponse = (data) => {
   if (!data || typeof data !== 'object') return '';
-  const link = data._links?.['tokens:token'];
-  return trim(link?.href || '');
+  const embeddedToken = data._embedded?.token;
+  const v3Link = embeddedToken?._links?.['tokens:token']?.href || embeddedToken?.tokenPaymentInstrument?.href;
+  if (v3Link) return trim(String(v3Link));
+  const v2Link = data._links?.['tokens:token']?.href;
+  return trim(String(v2Link || ''));
+};
+
+const extractVerifiedTokenOutcome = (data) => {
+  if (!data || typeof data !== 'object') return '';
+  const fromEmbedded = data._embedded?.verification?.outcome;
+  if (fromEmbedded != null && fromEmbedded !== '') return String(fromEmbedded).toLowerCase();
+  return String(data.outcome || '').toLowerCase();
 };
 
 /**
@@ -169,6 +183,12 @@ const createWorldpayOneTimeVerifiedToken = async ({
   const path = trim(process.env.WORLDPAY_VERIFIED_TOKENS_PATH) || '/verifiedTokens/oneTime';
   const idempotencyKey = crypto.randomUUID();
   const holder = trim(cardHolderName) || 'Customer';
+  const vtVersion = getVerifiedTokensMediaVersion();
+  const narrativeLine1 = (
+    trim(process.env.WORLDPAY_TOKEN_NARRATIVE_LINE1)
+    || trim(process.env.WORLDPAY_STATEMENT_LINE1)
+    || 'Card payment'
+  ).slice(0, 24);
   const body = {
     description: (trim(process.env.WORLDPAY_TOKEN_DESCRIPTION) || 'One-time checkout payment').slice(0, 255),
     paymentInstrument: {
@@ -180,6 +200,10 @@ const createWorldpayOneTimeVerifiedToken = async ({
     merchant: { entity },
     verificationCurrency: String(currency || 'GBP').toUpperCase().slice(0, 3),
   };
+  // v3 OpenAPI lists narrative.line1 as required for oneTime; omit on v2 to avoid schema issues
+  if (Number(vtVersion) >= 3) {
+    body.narrative = { line1: narrativeLine1 };
+  }
 
   const res = await fetch(`${apiBase}${path}`, {
     method: 'POST',
@@ -196,15 +220,18 @@ const createWorldpayOneTimeVerifiedToken = async ({
   }
 
   if (!res.ok) {
-    const err = new Error(data?.message || 'Worldpay verified token creation failed');
+    const err = new Error(
+      data?.message || `Worldpay verified token creation failed (HTTP ${res.status})`,
+    );
     err.status = res.status;
     err.details = data;
     throw err;
   }
 
-  const outcome = String(data?.outcome || '').toLowerCase();
+  const outcome = extractVerifiedTokenOutcome(data);
   if (outcome && outcome !== 'verified') {
-    const err = new Error(data?.message || `Card verification did not succeed (${data?.outcome || 'unknown'})`);
+    const rawOutcome = data?._embedded?.verification?.outcome ?? data?.outcome ?? 'unknown';
+    const err = new Error(data?.message || `Card verification did not succeed (${rawOutcome})`);
     err.status = 402;
     err.details = data;
     throw err;
@@ -277,6 +304,7 @@ router.post('/worldpay/charge', async (req, res) => {
       orderReference,
       customerInfo = {},
       billingAddress = {},
+      orderDetails = {},
     } = req.body || {};
 
     const sessionInput = sessionHrefFromBody || sessionState;
@@ -315,20 +343,31 @@ router.post('/worldpay/charge', async (req, res) => {
 
     const statementLine1 = (trim(process.env.WORLDPAY_STATEMENT_LINE1) || 'Card payment').slice(0, 24);
 
-    const addr1 = billingAddress.address1 || billingAddress.street || customerInfo.address;
+    const addr1 = trim(billingAddress.address1 || billingAddress.street || customerInfo.address || '');
+    const city = trim(billingAddress.city || customerInfo.city || '');
+    const postalCode = trim(billingAddress.postalCode || customerInfo.postalCode || '');
     const cardHolderName = trim(customerInfo.name || '');
 
     let tokenHref = trim(String(tokenHrefFromBody || ''));
     if (!tokenHref) {
-      const piExtras = {};
-      if (addr1) {
-        piExtras.billingAddress = {
-          address1: addr1,
-          ...(billingAddress.postalCode ? { postalCode: billingAddress.postalCode } : {}),
-          ...(billingAddress.city ? { city: billingAddress.city } : {}),
-          countryCode: billingAddress.countryCode || 'GB',
-        };
+      if (!city || !postalCode) {
+        return res.status(400).json({
+          message: 'City and postcode are required for card payment (Worldpay billing address).',
+        });
       }
+      if (!addr1) {
+        return res.status(400).json({
+          message: 'Street address is required for card payment.',
+        });
+      }
+      const piExtras = {
+        billingAddress: {
+          address1: addr1,
+          city,
+          postalCode,
+          countryCode: billingAddress.countryCode || 'GB',
+        },
+      };
       try {
         tokenHref = await createWorldpayOneTimeVerifiedToken({
           authHeader,
@@ -373,11 +412,11 @@ router.post('/worldpay/charge', async (req, res) => {
         ...(customerInfo.name ? { firstName: String(customerInfo.name).split(/\s+/)[0] } : {}),
       };
     }
-    if (addr1 || billingAddress.postalCode || billingAddress.city) {
+    if (addr1 || postalCode || city) {
       worldpayBody.billingAddress = {
         ...(addr1 ? { address1: addr1 } : {}),
-        ...(billingAddress.postalCode ? { postalCode: billingAddress.postalCode } : {}),
-        ...(billingAddress.city ? { city: billingAddress.city } : {}),
+        ...(postalCode ? { postalCode } : {}),
+        ...(city ? { city } : {}),
         countryCode: billingAddress.countryCode || 'GB',
       };
     }
@@ -412,18 +451,95 @@ router.post('/worldpay/charge', async (req, res) => {
       });
     }
 
+    const paymentId = data?.transactionReference || data?.id || transactionReference;
+    const statusLabel = data?.outcome || data?.paymentStatus || 'authorized';
+
+    const persistedRow = {
+      source: 'worldpay-checkout',
+      orderReference: transactionReference,
+      paymentId,
+      status: statusLabel,
+      amount: Number(amount),
+      currency,
+      customer: {
+        name: trim(customerInfo.name),
+        email: trim(customerInfo.email),
+        phone: trim(customerInfo.phone),
+        address: addr1,
+        city,
+        postalCode,
+      },
+      orderDetails: orderDetails && typeof orderDetails === 'object' ? orderDetails : {},
+      worldpay: {
+        outcome: data?.outcome,
+        paymentStatus: data?.paymentStatus,
+        id: data?.id,
+      },
+    };
+
+    try {
+      await recordCheckoutOrder(persistedRow);
+    } catch (persistErr) {
+      console.error('[worldpay/charge] Failed to persist checkout order', persistErr);
+    }
+
+    const customerEmail = trim(customerInfo.email);
+    let receiptEmailSent = false;
+    let receiptEmailReason = null;
+    if (!customerEmail) {
+      receiptEmailReason = 'no_customer_email';
+    } else {
+      try {
+        const summaryLines = Array.isArray(orderDetails?.summary)
+          ? orderDetails.summary.map((row) => ({
+              label: String(row?.label ?? ''),
+              value: String(row?.value ?? ''),
+            }))
+          : [];
+        const mailResult = await sendPaymentReceiptEmail({
+          to: customerEmail,
+          orderReference: transactionReference,
+          paymentId,
+          amount: Number(amount),
+          currency,
+          customerName: trim(customerInfo.name) || 'Customer',
+          customerEmail,
+          phone: trim(customerInfo.phone),
+          addressLines: [addr1, [city, postalCode].filter(Boolean).join(', ')].filter(Boolean),
+          orderTitle: trim(orderDetails?.title),
+          orderDescription: trim(orderDetails?.description),
+          summaryLines,
+        });
+        receiptEmailSent = Boolean(mailResult?.sent);
+        if (!receiptEmailSent) {
+          receiptEmailReason = mailResult?.reason || 'not_sent';
+        }
+      } catch (mailErr) {
+        console.error('[worldpay/charge] Receipt email failed', mailErr);
+        receiptEmailReason = 'send_failed';
+      }
+    }
+
     res.json({
       success: true,
       provider: 'worldpay',
-      status: data?.outcome || data?.paymentStatus || 'authorized',
-      paymentId: data?.transactionReference || data?.id || transactionReference,
+      status: statusLabel,
+      paymentId,
       orderReference: transactionReference,
       amount: Number(amount),
       currency,
       worldpay: data,
+      receiptEmailSent,
+      receiptEmailReason,
     });
   } catch (error) {
-    res.status(500).json({ message: error.message || 'Worldpay charge failed' });
+    res.status(500).json({
+      message: error.message || 'Worldpay charge failed',
+      details: {
+        errorName: error.name || 'Error',
+        ...(process.env.NODE_ENV !== 'production' && error.stack ? { stack: error.stack } : {}),
+      },
+    });
   }
 });
 
