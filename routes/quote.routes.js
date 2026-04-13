@@ -1,58 +1,66 @@
-import express from 'express';
-import { body, validationResult } from 'express-validator';
-import sgMail from '@sendgrid/mail';
-import Quote from '../models/Quote.js';
-import { protect, admin } from '../middleware/auth.js';
-import { upload, uploadToCloudinary } from '../config/cloudinary.js';
+import express from "express";
+import { body, validationResult } from "express-validator";
+import sgMail from "@sendgrid/mail";
+import Quote from "../models/Quote.js";
+import { protect, admin } from "../middleware/auth.js";
+import { upload, uploadToCloudinary } from "../config/cloudinary.js";
 
 const router = express.Router();
 
 // @route   POST /api/quotes
 // @desc    Create new quote request
 // @access  Public
-router.post('/', upload.single('artwork'), [
-  body('name').trim().notEmpty().withMessage('Name is required'),
-  body('email').isEmail().withMessage('Please provide a valid email'),
-  body('phone').notEmpty().withMessage('Phone is required'),
-  body('projectType').notEmpty().withMessage('Project type is required'),
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+router.post(
+  "/",
+  upload.single("artwork"),
+  [
+    body("name").trim().notEmpty().withMessage("Name is required"),
+    body("email").isEmail().withMessage("Please provide a valid email"),
+    body("phone").notEmpty().withMessage("Phone is required"),
+    body("projectType").notEmpty().withMessage("Project type is required"),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
 
-    const payload = { ...req.body };
-    const initialMessage = String(req.body?.message || '').trim();
-    if (initialMessage) {
-      payload.conversation = [
-        { sender: 'customer', message: initialMessage, sentAt: new Date() },
-      ];
-    }
+      const payload = { ...req.body };
+      const initialMessage = String(req.body?.message || "").trim();
+      if (initialMessage) {
+        payload.conversation = [
+          { sender: "customer", message: initialMessage, sentAt: new Date() },
+        ];
+      }
 
-    if (req.file?.buffer) {
-      const uploadedArtwork = await uploadToCloudinary(req.file.buffer, 'printing-platform/quotes');
-      payload.artworkUrl = uploadedArtwork.url;
-      payload.artworkPublicId = uploadedArtwork.publicId;
-    }
+      if (req.file?.buffer) {
+        const uploadedArtwork = await uploadToCloudinary(
+          req.file.buffer,
+          "printing-platform/quotes",
+        );
+        payload.artworkUrl = uploadedArtwork.url;
+        payload.artworkPublicId = uploadedArtwork.publicId;
+      }
 
-    const quote = await Quote.create(payload);
-    res.status(201).json(quote);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
+      const quote = await Quote.create(payload);
+      res.status(201).json(quote);
+    } catch (error) {
+      res.status(500).json({ message: error.message });
+    }
+  },
+);
 
 // @route   GET /api/quotes
 // @desc    Get all quotes (admin only)
 // @access  Private/Admin
-router.get('/', protect, admin, async (req, res) => {
+router.get("/", protect, admin, async (req, res) => {
   try {
     const { status, page = 1, limit = 20 } = req.query;
     const query = status ? { status } : {};
 
     const quotes = await Quote.find(query)
-      .populate('respondedBy', 'name email')
+      .populate("respondedBy", "name email")
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -73,15 +81,14 @@ router.get('/', protect, admin, async (req, res) => {
 // @route   GET /api/quotes/my
 // @desc    Get quotes created by the authenticated user's email
 // @access  Private
-router.get('/my', protect, async (req, res) => {
+router.get("/my", protect, async (req, res) => {
   try {
     const email = req.user.email;
     if (!email) {
-      return res.status(400).json({ message: 'User email not found' });
+      return res.status(400).json({ message: "User email not found" });
     }
 
-    const quotes = await Quote.find({ email })
-      .sort({ createdAt: -1 });
+    const quotes = await Quote.find({ email }).sort({ createdAt: -1 });
 
     res.json(quotes);
   } catch (error) {
@@ -92,13 +99,15 @@ router.get('/my', protect, async (req, res) => {
 // @route   GET /api/quotes/:id
 // @desc    Get single quote
 // @access  Private/Admin
-router.get('/:id', protect, admin, async (req, res) => {
+router.get("/:id", protect, admin, async (req, res) => {
   try {
-    const quote = await Quote.findById(req.params.id)
-      .populate('respondedBy', 'name email');
+    const quote = await Quote.findById(req.params.id).populate(
+      "respondedBy",
+      "name email",
+    );
 
     if (!quote) {
-      return res.status(404).json({ message: 'Quote not found' });
+      return res.status(404).json({ message: "Quote not found" });
     }
 
     res.json(quote);
@@ -110,19 +119,22 @@ router.get('/:id', protect, admin, async (req, res) => {
 // @route   PUT /api/quotes/:id
 // @desc    Update quote (admin response)
 // @access  Private/Admin
-router.put('/:id', protect, admin, async (req, res) => {
+router.put("/:id", protect, admin, async (req, res) => {
   try {
     const quote = await Quote.findById(req.params.id);
     if (!quote) {
-      return res.status(404).json({ message: 'Quote not found' });
+      return res.status(404).json({ message: "Quote not found" });
     }
 
     quote.status = req.body.status || quote.status;
-    const incomingAdminResponse = String(req.body.adminResponse || '').trim();
-    if (incomingAdminResponse && incomingAdminResponse !== String(quote.adminResponse || '').trim()) {
+    const incomingAdminResponse = String(req.body.adminResponse || "").trim();
+    if (
+      incomingAdminResponse &&
+      incomingAdminResponse !== String(quote.adminResponse || "").trim()
+    ) {
       quote.conversation = quote.conversation || [];
       quote.conversation.push({
-        sender: 'admin',
+        sender: "admin",
         message: incomingAdminResponse,
         sentAt: new Date(),
       });
@@ -142,27 +154,32 @@ router.put('/:id', protect, admin, async (req, res) => {
 // @route   PUT /api/quotes/:id/reply
 // @desc    Customer reply on their own quote
 // @access  Private
-router.put('/:id/reply', protect, async (req, res) => {
+router.put("/:id/reply", protect, async (req, res) => {
   try {
     const quote = await Quote.findById(req.params.id);
     if (!quote) {
-      return res.status(404).json({ message: 'Quote not found' });
+      return res.status(404).json({ message: "Quote not found" });
     }
 
-    if (String(quote.email || '').toLowerCase() !== String(req.user.email || '').toLowerCase()) {
-      return res.status(403).json({ message: 'You can only reply to your own quotes' });
+    if (
+      String(quote.email || "").toLowerCase() !==
+      String(req.user.email || "").toLowerCase()
+    ) {
+      return res
+        .status(403)
+        .json({ message: "You can only reply to your own quotes" });
     }
 
-    const reply = String(req.body?.customerReply || '').trim();
+    const reply = String(req.body?.customerReply || "").trim();
     if (!reply) {
-      return res.status(400).json({ message: 'Reply message is required' });
+      return res.status(400).json({ message: "Reply message is required" });
     }
 
     quote.customerReply = reply;
     quote.customerRepliedAt = new Date();
     quote.conversation = quote.conversation || [];
     quote.conversation.push({
-      sender: 'customer',
+      sender: "customer",
       message: reply,
       sentAt: quote.customerRepliedAt,
     });
@@ -177,45 +194,54 @@ router.put('/:id/reply', protect, async (req, res) => {
 // @route   POST /api/quotes/:id/send-email
 // @desc    Send quotation email to customer (admin only)
 // @access  Private/Admin
-router.post('/:id/send-email', protect, admin, async (req, res) => {
+router.post("/:id/send-email", protect, admin, async (req, res) => {
   try {
     const quote = await Quote.findById(req.params.id);
     if (!quote) {
-      return res.status(404).json({ message: 'Quote not found' });
+      return res.status(404).json({ message: "Quote not found" });
     }
 
     if (!quote.email) {
-      return res.status(400).json({ message: 'Customer email is missing for this quote' });
+      return res
+        .status(400)
+        .json({ message: "Customer email is missing for this quote" });
     }
 
     const sendGridApiKey = process.env.SENDGRID_API_KEY;
-    const senderEmail = process.env.SENDGRID_FROM_EMAIL || process.env.MAIL_FROM;
+    const senderEmail =
+      process.env.SENDGRID_FROM_EMAIL || process.env.MAIL_FROM;
     if (!sendGridApiKey || !senderEmail) {
-      return res.status(500).json({ message: 'SendGrid is not configured on server' });
+      return res
+        .status(500)
+        .json({ message: "SendGrid is not configured on server" });
     }
     sgMail.setApiKey(sendGridApiKey);
 
-    const responseText = req.body?.adminResponse || quote.adminResponse || '';
+    const responseText = req.body?.adminResponse || quote.adminResponse || "";
     const quotedPrice = req.body?.quotedPrice ?? quote.quotedPrice;
-    const formattedPrice = quotedPrice !== undefined && quotedPrice !== null && quotedPrice !== ''
-      ? `£${Number(quotedPrice).toFixed(2)}`
-      : 'TBC';
+    const formattedPrice =
+      quotedPrice !== undefined && quotedPrice !== null && quotedPrice !== ""
+        ? `£${Number(quotedPrice).toFixed(2)}`
+        : "TBC";
 
-    const subject = `Quotation for ${quote.projectType || 'your project'}`;
+    const subject = `Quotation for ${quote.projectType || "your project"}`;
 
     // Build attractive, brandable HTML
-    const brandName = process.env.BRAND_NAME || 'RSP';
-    const brandPrimary = '#0ea5e9'; // blue-500
-    const brandAccent = '#f59e0b';  // amber-500
+    const brandName = process.env.BRAND_NAME || "RSP";
+    const brandPrimary = "#0ea5e9"; // blue-500
+    const brandAccent = "#f59e0b"; // amber-500
     const brandLogo =
       process.env.BRAND_LOGO_URL ||
-      `${process.env.APP_BASE_URL || ''}/logo.png`;
+      `${process.env.APP_BASE_URL || ""}/logo.png`;
 
-    const safe = (s) => String(s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const responseHtml = String(responseText || '')
-      .split('\n')
-      .map(line => safe(line))
-      .join('<br/>');
+    const safe = (s) =>
+      String(s || "")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    const responseHtml = String(responseText || "")
+      .split("\n")
+      .map((line) => safe(line))
+      .join("<br/>");
 
     const html = `
 <!DOCTYPE html>
@@ -257,12 +283,12 @@ router.post('/:id/send-email', protect, admin, async (req, res) => {
   <div class="container">
     <div class="card">
       <div class="header">
-        <h1>Quotation for ${safe(quote.projectType || 'your project')}</h1>
+        <h1>Quotation for ${safe(quote.projectType || "your project")}</h1>
         <div class="tag">${safe(brandName)} QUOTE</div>
       </div>
       <div class="content">
         <div class="panel">
-          <p class="label">Hi ${safe(quote.name || 'Customer')},</p>
+          <p class="label">Hi ${safe(quote.name || "Customer")},</p>
           <p class="value" style="font-weight:500;">
             Thank you for your enquiry. Please find your tailored quotation and details below.
           </p>
@@ -273,49 +299,61 @@ router.post('/:id/send-email', protect, admin, async (req, res) => {
             <p class="label">Quoted Price</p>
             <p class="price">${safe(formattedPrice)}</p>
           </div>
-          ${quote.artworkUrl ? `
+          ${
+            quote.artworkUrl
+              ? `
           <div>
             <p class="label" style="text-align:center;">Your Artwork</p>
             <a href="${safe(quote.artworkUrl)}" target="_blank" rel="noreferrer" style="text-decoration:none;">
               <img alt="Artwork" class="artwork" src="${safe(quote.artworkUrl)}" />
             </a>
             <p class="muted" style="text-align:center; margin-top:6px;">Click to open full image</p>
-          </div>` : ``}
+          </div>`
+              : ``
+          }
         </div>
 
-        ${responseHtml ? `
+        ${
+          responseHtml
+            ? `
         <div class="panel">
           <p class="label">Notes from our team</p>
           <p class="value" style="font-weight:500;">${responseHtml}</p>
-        </div>` : ``}
+        </div>`
+            : ``
+        }
 
         <div class="panel">
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
             <div>
               <p class="label">Project Type</p>
-              <p class="value">${safe(quote.projectType || 'N/A')}</p>
+              <p class="value">${safe(quote.projectType || "N/A")}</p>
             </div>
             <div>
               <p class="label">Quantity</p>
-              <p class="value">${safe(quote.quantity || 'N/A')}</p>
+              <p class="value">${safe(quote.quantity || "N/A")}</p>
             </div>
             <div>
               <p class="label">Ideal Sign Width</p>
-              <p class="value">${safe(quote.idealSignWidth || 'N/A')}</p>
+              <p class="value">${safe(quote.idealSignWidth || "N/A")}</p>
             </div>
             <div>
               <p class="label">Country</p>
-              <p class="value">${safe(quote.country || 'United Kingdom')}</p>
+              <p class="value">${safe(quote.country || "United Kingdom")}</p>
             </div>
           </div>
-          ${quote.additionalInfo ? `
+          ${
+            quote.additionalInfo
+              ? `
           <div class="divider"></div>
           <p class="label">Additional Information</p>
-          <p class="value" style="font-weight:500;">${safe(quote.additionalInfo)}</p>` : ``}
+          <p class="value" style="font-weight:500;">${safe(quote.additionalInfo)}</p>`
+              : ``
+          }
         </div>
 
         <div style="text-align:center; margin-top:8px;">
-          <a class="cta" href="mailto:${safe(quote.email)}?subject=${encodeURIComponent('Re: ' + (quote.projectType || 'Quotation'))}">
+          <a class="cta" href="mailto:${safe(quote.email)}?subject=${encodeURIComponent("Re: " + (quote.projectType || "Quotation"))}">
             Reply to confirm
           </a>
           <p class="muted" style="margin-top:10px;">
@@ -344,22 +382,28 @@ router.post('/:id/send-email', protect, admin, async (req, res) => {
       html,
     });
 
-    quote.status = req.body?.status || quote.status || 'quoted';
-    if (responseText && responseText !== String(quote.adminResponse || '').trim()) {
+    quote.status = req.body?.status || quote.status || "quoted";
+    if (
+      responseText &&
+      responseText !== String(quote.adminResponse || "").trim()
+    ) {
       quote.conversation = quote.conversation || [];
       quote.conversation.push({
-        sender: 'admin',
+        sender: "admin",
         message: responseText,
         sentAt: new Date(),
       });
     }
     quote.adminResponse = responseText || quote.adminResponse;
-    quote.quotedPrice = quotedPrice !== undefined && quotedPrice !== null && quotedPrice !== '' ? Number(quotedPrice) : quote.quotedPrice;
+    quote.quotedPrice =
+      quotedPrice !== undefined && quotedPrice !== null && quotedPrice !== ""
+        ? Number(quotedPrice)
+        : quote.quotedPrice;
     quote.respondedBy = req.user._id;
     quote.respondedAt = new Date();
     await quote.save();
 
-    res.json({ message: 'Quotation email sent successfully', quote });
+    res.json({ message: "Quotation email sent successfully", quote });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

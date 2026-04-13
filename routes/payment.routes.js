@@ -2,6 +2,8 @@ import express from "express";
 import crypto from "crypto";
 import { recordCheckoutOrder } from "../services/checkoutOrdersStore.js";
 import { sendPaymentReceiptEmail } from "../services/receiptMail.js";
+import { optionalAuth } from "../middleware/optionalAuth.js";
+import Cart from "../models/Cart.js";
 
 const router = express.Router();
 
@@ -334,7 +336,7 @@ router.post("/worldpay/checkout-session", async (req, res) => {
 // @route   POST /api/payments/worldpay/charge
 // @desc    Authorize payment with Worldpay Access API
 // @access  Public
-router.post("/worldpay/charge", async (req, res) => {
+router.post("/worldpay/charge", optionalAuth, async (req, res) => {
   try {
     const {
       sessionState,
@@ -523,8 +525,11 @@ router.post("/worldpay/charge", async (req, res) => {
       });
     }
 
+    const worldpayPaymentRef = trim(data?.paymentId || data?.id || "");
     const paymentId =
-      data?.transactionReference || data?.id || transactionReference;
+      worldpayPaymentRef ||
+      trim(data?.transactionReference || "") ||
+      transactionReference;
     const statusLabel = data?.outcome || data?.paymentStatus || "authorized";
 
     const persistedRow = {
@@ -598,6 +603,22 @@ router.post("/worldpay/charge", async (req, res) => {
         console.error("[worldpay/charge] Receipt email failed", mailErr);
         receiptEmailReason = "send_failed";
       }
+    }
+
+    try {
+      if (req.user?._id) {
+        await Cart.updateOne({ user: req.user._id }, { $set: { items: [] } });
+      } else {
+        const guestClientId = trim(req.headers["x-client-id"]);
+        if (guestClientId.length >= 8) {
+          await Cart.updateOne(
+            { guestClientId },
+            { $set: { items: [] } },
+          );
+        }
+      }
+    } catch (cartErr) {
+      console.error("[worldpay/charge] Failed to clear basket", cartErr);
     }
 
     res.json({

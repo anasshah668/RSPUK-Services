@@ -1,13 +1,6 @@
-const trim = (value) => String(value ?? '').trim();
+import sgMail from '@sendgrid/mail';
 
-async function loadNodemailer() {
-  try {
-    const mod = await import('nodemailer');
-    return mod.default;
-  } catch {
-    return null;
-  }
-}
+const trim = (value) => String(value ?? '').trim();
 
 const formatMoney = (amount, currency) => {
   const n = Number(amount);
@@ -76,30 +69,13 @@ export async function sendPaymentReceiptEmail({
   const disabled = trim(process.env.RECEIPT_EMAIL_ENABLED).toLowerCase() === 'false';
   if (disabled) return { sent: false, reason: 'disabled' };
 
-  const host = trim(process.env.SMTP_HOST);
-  if (!host) {
-    console.warn('[receipt-mail] SMTP_HOST not set; skipping receipt email');
-    return { sent: false, reason: 'no_smtp' };
+  const sendGridApiKey = process.env.SENDGRID_API_KEY;
+  const senderEmail = process.env.SENDGRID_FROM_EMAIL || process.env.MAIL_FROM;
+  if (!sendGridApiKey || !senderEmail) {
+    console.warn('[receipt-mail] SendGrid is not configured on server');
+    return { sent: false, reason: 'no_sendgrid' };
   }
-
-  const port = Number(process.env.SMTP_PORT) || 587;
-  const user = trim(process.env.SMTP_USER);
-  const pass = trim(process.env.SMTP_PASS);
-  const from = trim(process.env.SMTP_FROM) || user || 'noreply@localhost';
-
-  const nodemailer = await loadNodemailer();
-  if (!nodemailer) {
-    console.warn('[receipt-mail] nodemailer is not installed; run: npm install nodemailer');
-    return { sent: false, reason: 'no_nodemailer' };
-  }
-
-  const transporter = nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    requireTLS: port === 587,
-    ...(user && pass ? { auth: { user, pass } } : {}),
-  });
+  sgMail.setApiKey(sendGridApiKey);
 
   const subject =
     trim(process.env.RECEIPT_EMAIL_SUBJECT_PREFIX) || 'Payment receipt';
@@ -117,12 +93,17 @@ export async function sendPaymentReceiptEmail({
     summaryLines,
   });
 
-  await transporter.sendMail({
-    from,
-    to,
-    subject: `${subject} — ${orderReference}`,
-    text,
-  });
+  try {
+    await sgMail.send({
+      from: senderEmail,
+      to,
+      subject: `${subject} — ${orderReference}`,
+      text,
+    });
+  } catch (err) {
+    console.error('[receipt-mail] SendGrid send failed', err?.response?.body || err?.message || err);
+    return { sent: false, reason: 'send_failed' };
+  }
 
   console.info(`[receipt-mail] Receipt sent to ${to} (order ${orderReference})`);
   return { sent: true };

@@ -1,15 +1,16 @@
-import express from 'express';
-import { randomUUID } from 'crypto';
-import Cart from '../models/Cart.js';
-import { optionalAuth } from '../middleware/optionalAuth.js';
-import { protect } from '../middleware/auth.js';
+import express from "express";
+import { randomUUID } from "crypto";
+import Cart from "../models/Cart.js";
+import { optionalAuth } from "../middleware/optionalAuth.js";
+import { protect } from "../middleware/auth.js";
 
 const router = express.Router();
 
-const trim = (value) => String(value ?? '').trim();
+const trim = (value) => String(value ?? "").trim();
 
 const formatLineForClient = (line) => {
-  const payload = line.payload && typeof line.payload === 'object' ? { ...line.payload } : {};
+  const payload =
+    line.payload && typeof line.payload === "object" ? { ...line.payload } : {};
   const { quantity: _ignoredQty, lineId: _ignoredLine, ...rest } = payload;
   return {
     ...rest,
@@ -27,9 +28,9 @@ async function getOrCreateCartForRequest(req) {
     return cart;
   }
 
-  const guestClientId = trim(req.headers['x-client-id']);
+  const guestClientId = trim(req.headers["x-client-id"]);
   if (!guestClientId || guestClientId.length < 8) {
-    const err = new Error('CLIENT_ID_REQUIRED');
+    const err = new Error("CLIENT_ID_REQUIRED");
     err.status = 400;
     throw err;
   }
@@ -46,9 +47,10 @@ const withCart = async (req, res, next) => {
     req.cart = await getOrCreateCartForRequest(req);
     next();
   } catch (e) {
-    if (e.message === 'CLIENT_ID_REQUIRED') {
+    if (e.message === "CLIENT_ID_REQUIRED") {
       return res.status(400).json({
-        message: 'X-Client-Id header is required for a guest basket. It is set automatically by the site once the browser storage is available.',
+        message:
+          "X-Client-Id header is required for a guest basket. It is set automatically by the site once the browser storage is available.",
       });
     }
     next(e);
@@ -57,9 +59,11 @@ const withCart = async (req, res, next) => {
 
 router.use(optionalAuth);
 
-router.post('/merge', protect, async (req, res) => {
+router.post("/merge", protect, async (req, res) => {
   try {
-    const guestClientId = trim(req.body?.guestClientId || req.headers['x-client-id']);
+    const guestClientId = trim(
+      req.body?.guestClientId || req.headers["x-client-id"],
+    );
     if (!guestClientId || guestClientId.length < 8) {
       return res.json({ merged: false, items: [] });
     }
@@ -84,7 +88,9 @@ router.post('/merge', protect, async (req, res) => {
         });
         continue;
       }
-      const existing = userCart.items.find((i) => String(i.payload?.id) === pid);
+      const existing = userCart.items.find(
+        (i) => String(i.payload?.id) === pid,
+      );
       if (existing) {
         existing.quantity += line.quantity;
       } else {
@@ -104,29 +110,36 @@ router.post('/merge', protect, async (req, res) => {
       items: userCart.items.map(formatLineForClient),
     });
   } catch (error) {
-    res.status(500).json({ message: error.message || 'Cart merge failed' });
+    res.status(500).json({ message: error.message || "Cart merge failed" });
   }
 });
 
-router.get('/', withCart, async (req, res) => {
+router.get("/", withCart, async (req, res) => {
   res.json({ items: req.cart.items.map(formatLineForClient) });
 });
 
-router.delete('/', withCart, async (req, res) => {
+router.delete("/", withCart, async (req, res) => {
   try {
     req.cart.items = [];
     await req.cart.save();
     res.json({ items: [] });
   } catch (error) {
-    res.status(500).json({ message: error.message || 'Failed to clear basket' });
+    res
+      .status(500)
+      .json({ message: error.message || "Failed to clear basket" });
   }
 });
 
-router.post('/items', withCart, async (req, res) => {
+router.post("/items", withCart, async (req, res) => {
   try {
     const { item, quantity = 1 } = req.body || {};
-    if (!item || typeof item !== 'object' || item.id == null || String(item.id).trim() === '') {
-      return res.status(400).json({ message: 'item with id is required' });
+    if (
+      !item ||
+      typeof item !== "object" ||
+      item.id == null ||
+      String(item.id).trim() === ""
+    ) {
+      return res.status(400).json({ message: "item with id is required" });
     }
 
     const qty = Math.max(1, Math.floor(Number(quantity)) || 1);
@@ -147,11 +160,11 @@ router.post('/items', withCart, async (req, res) => {
     await cart.save();
     res.json({ items: cart.items.map(formatLineForClient) });
   } catch (error) {
-    res.status(500).json({ message: error.message || 'Failed to add item' });
+    res.status(500).json({ message: error.message || "Failed to add item" });
   }
 });
 
-router.delete('/items/:lineId', withCart, async (req, res) => {
+router.delete("/items/:lineId", withCart, async (req, res) => {
   try {
     const { lineId } = req.params;
     const cart = req.cart;
@@ -159,18 +172,18 @@ router.delete('/items/:lineId', withCart, async (req, res) => {
     await cart.save();
     res.json({ items: cart.items.map(formatLineForClient) });
   } catch (error) {
-    res.status(500).json({ message: error.message || 'Failed to remove item' });
+    res.status(500).json({ message: error.message || "Failed to remove item" });
   }
 });
 
-router.patch('/items/:lineId', withCart, async (req, res) => {
+router.patch("/items/:lineId", withCart, async (req, res) => {
   try {
     const { lineId } = req.params;
     const quantity = Number(req.body?.quantity);
     const cart = req.cart;
     const line = cart.items.find((i) => i.lineId === lineId);
     if (!line) {
-      return res.status(404).json({ message: 'Basket line not found' });
+      return res.status(404).json({ message: "Basket line not found" });
     }
     if (!Number.isFinite(quantity) || quantity < 1) {
       cart.items = cart.items.filter((i) => i.lineId !== lineId);
@@ -180,7 +193,7 @@ router.patch('/items/:lineId', withCart, async (req, res) => {
     await cart.save();
     res.json({ items: cart.items.map(formatLineForClient) });
   } catch (error) {
-    res.status(500).json({ message: error.message || 'Failed to update item' });
+    res.status(500).json({ message: error.message || "Failed to update item" });
   }
 });
 
