@@ -14,6 +14,16 @@ import {
 
 const router = express.Router();
 
+const normalizeFaqs = (input) => {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((item) => ({
+      question: String(item?.question || '').trim(),
+      answer: String(item?.answer || '').trim(),
+    }))
+    .filter((item) => item.question && item.answer);
+};
+
 // All admin routes require authentication and admin role
 router.use(protect);
 router.use(admin);
@@ -97,6 +107,16 @@ router.post('/products', (req, res, next) => {
           : req.body.pricingTable;
       } catch (e) {
         console.warn('Invalid pricingTable JSON, ignoring:', e?.message);
+      }
+    }
+    if (req.body.faqs) {
+      try {
+        const parsedFaqs = typeof req.body.faqs === 'string'
+          ? JSON.parse(req.body.faqs)
+          : req.body.faqs;
+        productData.faqs = normalizeFaqs(parsedFaqs);
+      } catch (e) {
+        console.warn('Invalid faqs JSON, ignoring:', e?.message);
       }
     }
 
@@ -186,6 +206,16 @@ router.put('/products/:id', (req, res, next) => {
           : req.body.pricingTable;
       } catch (e) {
         console.warn('Invalid pricingTable JSON, ignoring:', e?.message);
+      }
+    }
+    if (req.body.faqs !== undefined) {
+      try {
+        const parsedFaqs = typeof req.body.faqs === 'string'
+          ? JSON.parse(req.body.faqs)
+          : req.body.faqs;
+        product.faqs = normalizeFaqs(parsedFaqs);
+      } catch (e) {
+        console.warn('Invalid faqs JSON, ignoring:', e?.message);
       }
     }
 
