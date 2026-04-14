@@ -4,10 +4,17 @@ import { recordCheckoutOrder } from "../services/checkoutOrdersStore.js";
 import { sendPaymentReceiptEmail } from "../services/receiptMail.js";
 import { optionalAuth } from "../middleware/optionalAuth.js";
 import Cart from "../models/Cart.js";
+import Order from "../models/Order.js";
 
 const router = express.Router();
 
 const trim = (value) => String(value ?? "").trim();
+const makeTrackingId = () =>
+  `RSP-${new Date().getFullYear()}-${crypto
+    .randomUUID()
+    .replace(/-/g, "")
+    .slice(0, 8)
+    .toUpperCase()}`;
 
 const toMinorUnits = (amount) => {
   const value = Number(amount);
@@ -531,6 +538,7 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
       trim(data?.transactionReference || "") ||
       transactionReference;
     const statusLabel = data?.outcome || data?.paymentStatus || "authorized";
+    const generatedTrackingId = makeTrackingId();
 
     const persistedRow = {
       source: "worldpay-checkout",
@@ -540,6 +548,7 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
       amount: Number(amount),
       currency,
       userId: req.user?._id ? String(req.user._id) : undefined,
+      trackingId: generatedTrackingId,
       customer: {
         name: trim(customerInfo.name),
         email: trim(customerInfo.email),
@@ -565,6 +574,40 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
         "[worldpay/charge] Failed to persist checkout order",
         persistErr,
       );
+    }
+
+    // Persist a normalized order row in Mongo as well, so admin/orders and analytics stay in one table.
+    try {
+      await Order.create({
+        user: req.user?._id || undefined,
+        items: [],
+        shippingAddress: {
+          name: trim(customerInfo.name),
+          street: addr1,
+          city,
+          zipCode: postalCode,
+          country: billingAddress.countryCode || "GB",
+          phone: trim(customerInfo.phone),
+        },
+        billingAddress: {
+          name: trim(customerInfo.name),
+          street: addr1,
+          city,
+          zipCode: postalCode,
+          country: billingAddress.countryCode || "GB",
+        },
+        subtotal: Number(amount),
+        shippingCost: 0,
+        tax: 0,
+        total: Number(amount),
+        status: "pending",
+        paymentStatus: "paid",
+        paymentMethod: "worldpay-checkout",
+        paymentId,
+        trackingNumber: trim(savedOrderRow?.trackingId || generatedTrackingId),
+      });
+    } catch (mongoPersistErr) {
+      console.error("[worldpay/charge] Failed to persist Mongo order", mongoPersistErr);
     }
 
     const customerEmail = trim(customerInfo.email);
@@ -595,7 +638,7 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
           ].filter(Boolean),
           orderTitle: trim(orderDetails?.title),
           orderDescription: trim(orderDetails?.description),
-          trackingId: trim(savedOrderRow?.trackingId),
+          trackingId: trim(savedOrderRow?.trackingId || generatedTrackingId),
           summaryLines,
         });
         receiptEmailSent = Boolean(mailResult?.sent);
@@ -630,7 +673,7 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
       status: statusLabel,
       paymentId,
       orderReference: transactionReference,
-      trackingId: trim(savedOrderRow?.trackingId) || null,
+      trackingId: trim(savedOrderRow?.trackingId || generatedTrackingId) || null,
       amount: Number(amount),
       currency,
       worldpay: data,
