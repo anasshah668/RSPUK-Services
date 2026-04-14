@@ -6,6 +6,11 @@ import User from '../models/User.js';
 import { getNeonPricingSettings, updateNeonPricingSettings } from '../controllers/neonPricing.controller.js';
 import { protect, admin } from '../middleware/auth.js';
 import { upload, uploadMultipleToCloudinary } from '../config/cloudinary.js';
+import {
+  listCheckoutOrders,
+  normalizeCheckoutRowForAdmin,
+  updateCheckoutOrderStatus,
+} from '../services/checkoutOrdersStore.js';
 
 const router = express.Router();
 
@@ -212,26 +217,53 @@ router.delete('/products/:id', async (req, res) => {
 // ==================== ORDER MANAGEMENT ====================
 
 // @route   GET /api/admin/orders
-// @desc    Get all orders
+// @desc    Get all orders (shop Mongo + paid Worldpay checkouts from file)
 // @access  Private/Admin
 router.get('/orders', async (req, res) => {
   try {
-    const { status, page = 1, limit = 20 } = req.query;
-    const query = status ? { status } : {};
+    const { status, page = 1, limit = 50 } = req.query;
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, Number(limit) || 50));
+    const statusAliases = { waiting: 'pending', inprocess: 'processing', completed: 'delivered' };
+    const mongoStatus = statusAliases[String(status || '').toLowerCase()];
+    const query = status ? { status: mongoStatus || status } : {};
 
-    const orders = await Order.find(query)
+    const MAX_SHOP = 2000;
+    const shopOrders = await Order.find(query)
       .populate('user', 'name email')
       .populate('items.product')
       .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .limit(MAX_SHOP)
+      .lean();
 
-    const total = await Order.countDocuments(query);
+    const shopMapped = shopOrders.map((o) => ({ ...o, orderKind: 'shop' }));
+
+    let checkoutRows = [];
+    try {
+      checkoutRows = await listCheckoutOrders();
+    } catch (e) {
+      console.error('[admin/orders] listCheckoutOrders failed', e);
+    }
+    const checkoutMapped = checkoutRows
+      .map((row) => normalizeCheckoutRowForAdmin(row))
+      .filter(Boolean);
+
+    let merged = [...shopMapped, ...checkoutMapped].sort(
+      (a, b) => new Date(b.createdAt) - new Date(a.createdAt),
+    );
+
+    if (status) {
+      merged = merged.filter((o) => String(o.status) === String(status));
+    }
+
+    const total = merged.length;
+    const start = (pageNum - 1) * limitNum;
+    const orders = merged.slice(start, start + limitNum);
 
     res.json({
       orders,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
+      totalPages: Math.ceil(total / limitNum) || 1,
+      currentPage: pageNum,
       total,
     });
   } catch (error) {
@@ -240,22 +272,41 @@ router.get('/orders', async (req, res) => {
 });
 
 // @route   PUT /api/admin/orders/:id/status
-// @desc    Update order status
+// @desc    Update order status (Mongo shop order or Worldpay checkout row by UUID)
 // @access  Private/Admin
 router.put('/orders/:id/status', async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id);
-    if (!order) {
+    const id = String(req.params.id || '');
+    const newStatus = req.body.status;
+    if (!newStatus) {
+      return res.status(400).json({ message: 'status is required' });
+    }
+
+    if (/^[a-fA-F0-9]{24}$/.test(id)) {
+      const order = await Order.findById(id);
+      if (!order) {
+        return res.status(404).json({ message: 'Order not found' });
+      }
+
+      const statusAliasesWrite = { waiting: 'pending', inprocess: 'processing', completed: 'delivered' };
+      order.status = statusAliasesWrite[String(newStatus || '').toLowerCase()] || newStatus;
+      if (req.body.trackingNumber) {
+        order.trackingNumber = req.body.trackingNumber;
+      }
+
+      await order.save();
+      const populated = await Order.findById(order._id)
+        .populate('user', 'name email')
+        .populate('items.product')
+        .lean();
+      return res.json({ ...populated, orderKind: 'shop' });
+    }
+
+    const updatedRow = await updateCheckoutOrderStatus(id, newStatus);
+    if (!updatedRow) {
       return res.status(404).json({ message: 'Order not found' });
     }
-
-    order.status = req.body.status;
-    if (req.body.trackingNumber) {
-      order.trackingNumber = req.body.trackingNumber;
-    }
-
-    await order.save();
-    res.json(order);
+    return res.json(normalizeCheckoutRowForAdmin(updatedRow));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

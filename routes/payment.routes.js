@@ -539,6 +539,7 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
       status: statusLabel,
       amount: Number(amount),
       currency,
+      userId: req.user?._id ? String(req.user._id) : undefined,
       customer: {
         name: trim(customerInfo.name),
         email: trim(customerInfo.email),
@@ -556,8 +557,9 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
       },
     };
 
+    let savedOrderRow = null;
     try {
-      await recordCheckoutOrder(persistedRow);
+      savedOrderRow = await recordCheckoutOrder(persistedRow);
     } catch (persistErr) {
       console.error(
         "[worldpay/charge] Failed to persist checkout order",
@@ -593,6 +595,7 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
           ].filter(Boolean),
           orderTitle: trim(orderDetails?.title),
           orderDescription: trim(orderDetails?.description),
+          trackingId: trim(savedOrderRow?.trackingId),
           summaryLines,
         });
         receiptEmailSent = Boolean(mailResult?.sent);
@@ -627,6 +630,7 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
       status: statusLabel,
       paymentId,
       orderReference: transactionReference,
+      trackingId: trim(savedOrderRow?.trackingId) || null,
       amount: Number(amount),
       currency,
       worldpay: data,

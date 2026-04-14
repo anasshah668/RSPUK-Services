@@ -1,6 +1,7 @@
 import express from 'express';
 import Order from '../models/Order.js';
 import { protect } from '../middleware/auth.js';
+import { findCheckoutOrderByTrackingId } from '../services/checkoutOrdersStore.js';
 
 const router = express.Router();
 
@@ -67,30 +68,61 @@ router.get('/:id', protect, async (req, res) => {
 // @access  Public
 router.get('/track/:trackingNumber', async (req, res) => {
   try {
-    const { trackingNumber } = req.params;
-    const order = await Order.findOne({ trackingNumber })
+    const trackingNumber = String(req.params.trackingNumber || '').trim();
+    const normalized = trackingNumber.toUpperCase();
+    const order = await Order.findOne({
+      trackingNumber: { $regex: `^${trackingNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+    })
       .populate('items.product', 'name productImage images');
 
-    if (!order) {
+    if (order) {
+      // Return safe subset for public tracking
+      return res.json({
+        trackingNumber: order.trackingNumber,
+        status: order.status,
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt,
+        items: (order.items || []).map((it) => ({
+          productName: it.product?.name || 'Product',
+          quantity: it.quantity,
+          price: it.price,
+          imageUrl: it.product?.productImage?.url || it.product?.images?.[0]?.url || null,
+        })),
+        shippingAddress: order.shippingAddress ? {
+          city: order.shippingAddress.city,
+          country: order.shippingAddress.country,
+        } : null,
+      });
+    }
+
+    const checkoutRow = await findCheckoutOrderByTrackingId(normalized);
+    if (!checkoutRow) {
       return res.status(404).json({ message: 'Tracking number not found' });
     }
 
-    // Return safe subset for public tracking
-    res.json({
-      trackingNumber: order.trackingNumber,
-      status: order.status,
-      createdAt: order.createdAt,
-      updatedAt: order.updatedAt,
-      items: (order.items || []).map((it) => ({
-        productName: it.product?.name || 'Product',
-        quantity: it.quantity,
-        price: it.price,
-        imageUrl: it.product?.productImage?.url || it.product?.images?.[0]?.url || null,
-      })),
-      shippingAddress: order.shippingAddress ? {
-        city: order.shippingAddress.city,
-        country: order.shippingAddress.country,
-      } : null,
+    const summary = Array.isArray(checkoutRow.orderDetails?.summary)
+      ? checkoutRow.orderDetails.summary
+      : [];
+    const itemsFromSummary = summary.map((row, idx) => ({
+      productName: String(row?.label || `Item ${idx + 1}`),
+      quantity: 1,
+      price: null,
+      note: String(row?.value || ''),
+      imageUrl: null,
+    }));
+
+    return res.json({
+      trackingNumber: checkoutRow.trackingId,
+      status: checkoutRow.adminStatus || 'waiting',
+      createdAt: checkoutRow.createdAt,
+      updatedAt: checkoutRow.adminStatusUpdatedAt || checkoutRow.createdAt,
+      orderReference: checkoutRow.orderReference,
+      paymentId: checkoutRow.paymentId,
+      items: itemsFromSummary,
+      shippingAddress: {
+        city: checkoutRow.customer?.city || '',
+        country: 'GB',
+      },
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

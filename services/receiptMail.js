@@ -31,6 +31,7 @@ const buildReceiptText = ({
   addressLines,
   orderTitle,
   orderDescription,
+  trackingId,
   summaryLines,
 }) => {
   const lines = [
@@ -40,6 +41,7 @@ const buildReceiptText = ({
     '',
     `Order reference: ${orderReference}`,
     `Payment reference: ${paymentId}`,
+    `Tracking ID: ${trackingId || '—'}`,
     `Amount paid: ${formatMoney(amount, currency)}`,
     '',
     'Bill to:',
@@ -56,6 +58,9 @@ const buildReceiptText = ({
     summaryLines.forEach(({ label, value }) => lines.push(`  ${label}: ${value}`));
   }
   lines.push('', '—', 'This email is your payment receipt. Please keep it for your records.');
+  if (trackingId) {
+    lines.push(`You can track your order in My Account > Track Order using: ${trackingId}`);
+  }
   return lines.join('\n');
 };
 
@@ -74,6 +79,7 @@ const buildReceiptHtml = ({
   addressLines,
   orderTitle,
   orderDescription,
+  trackingId,
   summaryLines,
 }) => {
   const amountLabel = formatMoney(amount, currency);
@@ -147,6 +153,10 @@ const buildReceiptHtml = ({
                         <td style="padding:8px 0 4px;font-size:14px;color:#6b7280;font-family:${fontStack};vertical-align:top;">Payment reference</td>
                         <td style="padding:8px 0 4px;font-size:12px;color:#111827;font-family:ui-monospace,'Cascadia Mono','Segoe UI Mono',monospace;text-align:right;word-break:break-all;">${esc(paymentId)}</td>
                       </tr>` : ''}
+                      ${trackingId ? `<tr>
+                        <td style="padding:8px 0 4px;font-size:14px;color:#6b7280;font-family:${fontStack};vertical-align:top;">Tracking ID</td>
+                        <td style="padding:8px 0 4px;font-size:12px;color:#111827;font-family:ui-monospace,'Cascadia Mono','Segoe UI Mono',monospace;text-align:right;word-break:break-all;">${esc(trackingId)}</td>
+                      </tr>` : ''}
                       <tr>
                         <td colspan="2" style="padding:12px 0 8px;border-top:1px solid #e5e7eb;"></td>
                       </tr>
@@ -184,6 +194,13 @@ const buildReceiptHtml = ({
                   </td>
                 </tr>
               </table>
+              ${trackingId ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top:12px;background-color:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;">
+                <tr>
+                  <td style="padding:12px 14px;font-size:14px;line-height:1.5;color:#1e3a8a;font-family:${fontStack};">
+                    You can track your order in <strong>My Account &gt; Track Order</strong> by entering Tracking ID: <strong style="font-family:ui-monospace,'Cascadia Mono','Segoe UI Mono',monospace;">${esc(trackingId)}</strong>.
+                  </td>
+                </tr>
+              </table>` : ''}
 
               ${siteUrlSafe ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top:20px;">
                 <tr>
@@ -217,6 +234,7 @@ export async function sendPaymentReceiptEmail({
   addressLines = [],
   orderTitle,
   orderDescription,
+  trackingId,
   summaryLines = [],
 }) {
   const disabled = trim(process.env.RECEIPT_EMAIL_ENABLED).toLowerCase() === 'false';
@@ -242,6 +260,7 @@ export async function sendPaymentReceiptEmail({
     addressLines,
     orderTitle,
     orderDescription,
+    trackingId,
     summaryLines,
   };
   const text = buildReceiptText(payload);
