@@ -261,6 +261,17 @@ const createWorldpayOneTimeVerifiedToken = async ({
   }
 
   if (!res.ok) {
+    // Worldpay can return 409 conflict for a one-time token when cardholder/billing
+    // details differ across attempts, while still returning a verified token payload.
+    // Keep security strict: only continue when verification outcome is "verified"
+    // AND a token href is present in the response body.
+    if (res.status === 409) {
+      const conflictOutcome = extractVerifiedTokenOutcome(data);
+      const conflictTokenHref = extractTokenHrefFromVerifiedTokenResponse(data);
+      if (conflictOutcome === "verified" && conflictTokenHref) {
+        return conflictTokenHref;
+      }
+    }
     const err = new Error(
       data?.message ||
         `Worldpay verified token creation failed (HTTP ${res.status})`,
