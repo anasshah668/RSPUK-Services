@@ -82,6 +82,8 @@ router.get('/track/:trackingNumber', async (req, res) => {
         status: order.status,
         createdAt: order.createdAt,
         updatedAt: order.updatedAt,
+        total: order.total,
+        currency: 'GBP',
         items: (order.items || []).map((it) => ({
           productName: it.product?.name || 'Product',
           quantity: it.quantity,
@@ -116,6 +118,9 @@ router.get('/track/:trackingNumber', async (req, res) => {
       status: checkoutRow.adminStatus || 'waiting',
       createdAt: checkoutRow.createdAt,
       updatedAt: checkoutRow.adminStatusUpdatedAt || checkoutRow.createdAt,
+      total: Number(checkoutRow.amount || 0),
+      currency: checkoutRow.currency || 'GBP',
+      orderTitle: checkoutRow.orderDetails?.title || 'Checkout order',
       orderReference: checkoutRow.orderReference,
       paymentId: checkoutRow.paymentId,
       items: itemsFromSummary,
