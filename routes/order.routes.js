@@ -2,6 +2,7 @@ import express from 'express';
 import Order from '../models/Order.js';
 import { protect } from '../middleware/auth.js';
 import { findCheckoutOrderByTrackingId } from '../services/checkoutOrdersStore.js';
+import { buildShopOrderDetailFromPayload } from '../services/orderDetailSnapshot.js';
 
 const router = express.Router();
 
@@ -10,9 +11,14 @@ const router = express.Router();
 // @access  Private
 router.post('/', protect, async (req, res) => {
   try {
+    const body = req.body && typeof req.body === 'object' ? { ...req.body } : {};
+    delete body.orderDetail;
+    const orderDetail = buildShopOrderDetailFromPayload(body);
+
     const order = await Order.create({
-      ...req.body,
+      ...body,
       user: req.user._id,
+      orderDetail,
     });
 
     const populatedOrder = await Order.findById(order._id)

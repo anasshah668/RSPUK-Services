@@ -100,6 +100,15 @@ const orderSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.Mixed,
     default: undefined,
   },
+  /**
+   * Full fulfilment snapshot: each paid line (options from Product Detail — size, delivery,
+   * selectedAttributes, business card fields, etc.) plus orderSummary and customer.
+   * Prefer this over inferring from `items` alone when populated.
+   */
+  orderDetail: {
+    type: mongoose.Schema.Types.Mixed,
+    default: undefined,
+  },
 }, {
   timestamps: true,
 });

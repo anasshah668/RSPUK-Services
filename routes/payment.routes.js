@@ -5,6 +5,7 @@ import { sendPaymentReceiptEmail } from "../services/receiptMail.js";
 import { optionalAuth } from "../middleware/optionalAuth.js";
 import Cart from "../models/Cart.js";
 import Order from "../models/Order.js";
+import { buildWorldpayOrderDetail } from "../services/orderDetailSnapshot.js";
 
 const router = express.Router();
 
@@ -55,6 +56,8 @@ const CHECKOUT_LINE_ALLOWED_KEYS = new Set([
   "encryptedProductId",
   "thirdPartyProductKey",
   "notes",
+  /** Explicit Product Detail snapshot (size, delivery, attributes, business card fields). */
+  "selectionSnapshot",
 ]);
 
 const CHECKOUT_LINE_NESTED_PLAIN_OBJECT_KEYS = new Set([
@@ -63,6 +66,7 @@ const CHECKOUT_LINE_NESTED_PLAIN_OBJECT_KEYS = new Set([
   "customization",
   "options",
   "productionData",
+  "selectionSnapshot",
 ]);
 
 /** Deep-ish copy of plain objects for fulfilment (no data URLs, bounded size). */
@@ -734,9 +738,16 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
 
     // Persist a normalized order row in Mongo as well, so admin/orders and analytics stay in one table.
     try {
+      const orderDetail = buildWorldpayOrderDetail({
+        lineItems,
+        orderDetails,
+        customer: persistedRow.customer,
+        source: "worldpay-checkout",
+      });
       await Order.create({
         user: req.user?._id || undefined,
         items: [],
+        orderDetail,
         checkoutContext: {
           source: "worldpay-checkout",
           lineItems,
