@@ -24,6 +24,7 @@ const toMinorUnits = (amount) => {
 
 const CHECKOUT_LINE_ALLOWED_KEYS = new Set([
   "id",
+  "lineId",
   "name",
   "title",
   "type",
@@ -39,6 +40,10 @@ const CHECKOUT_LINE_ALLOWED_KEYS = new Set([
   "lamination",
   "roundCorners",
   "selectedAttributes",
+  "variant",
+  "customization",
+  "options",
+  "productionData",
   "summary",
   "description",
   "artworkAttached",
@@ -46,7 +51,75 @@ const CHECKOUT_LINE_ALLOWED_KEYS = new Set([
   "paymentMethod",
   "vatInclusive",
   "productType",
+  "sku",
+  "encryptedProductId",
+  "thirdPartyProductKey",
+  "notes",
 ]);
+
+const CHECKOUT_LINE_NESTED_PLAIN_OBJECT_KEYS = new Set([
+  "selectedAttributes",
+  "variant",
+  "customization",
+  "options",
+  "productionData",
+]);
+
+/** Deep-ish copy of plain objects for fulfilment (no data URLs, bounded size). */
+function sanitizePlainObjectForLineItem(obj, maxKeys = 45, depth = 0, maxDepth = 5) {
+  if (depth > maxDepth || !obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+  const inner = {};
+  let n = 0;
+  for (const [ik, iv] of Object.entries(obj)) {
+    if (n >= maxKeys) break;
+    if (typeof iv === "string") {
+      if (iv.startsWith("data:")) continue;
+      inner[ik] = iv.slice(0, 4000);
+      n++;
+      continue;
+    }
+    if (typeof iv === "number" && Number.isFinite(iv)) {
+      inner[ik] = iv;
+      n++;
+      continue;
+    }
+    if (typeof iv === "boolean") {
+      inner[ik] = iv;
+      n++;
+      continue;
+    }
+    if (iv && typeof iv === "object" && !Array.isArray(iv)) {
+      const nested = sanitizePlainObjectForLineItem(iv, 35, depth + 1, maxDepth);
+      if (nested && Object.keys(nested).length) {
+        inner[ik] = nested;
+        n++;
+      }
+      continue;
+    }
+    if (Array.isArray(iv) && iv.length <= 80) {
+      const arr = [];
+      for (const x of iv) {
+        if (arr.length >= 40) break;
+        if (typeof x === "string") {
+          if (x.startsWith("data:")) continue;
+          arr.push(x.slice(0, 800));
+        } else if (typeof x === "number" && Number.isFinite(x)) arr.push(x);
+        else if (typeof x === "boolean") arr.push(x);
+        else if (x && typeof x === "object" && !Array.isArray(x) && x.label != null) {
+          arr.push({
+            label: String(x.label || "").slice(0, 120),
+            value: String(x.value || "").slice(0, 400),
+          });
+        }
+      }
+      if (arr.length) {
+        inner[ik] = arr;
+        n++;
+      }
+    }
+  }
+  return Object.keys(inner).length ? inner : null;
+}
 
 /** Strip huge / unsafe payloads; keep what production needs to fulfil the order. */
 function sanitizeLineItemsForPersistence(raw) {
@@ -72,8 +145,9 @@ function sanitizeLineItemsForPersistence(raw) {
         cleaned[k] = v;
         continue;
       }
-      if (k === "selectedAttributes" && typeof v === "object" && !Array.isArray(v)) {
-        cleaned[k] = { ...v };
+      if (CHECKOUT_LINE_NESTED_PLAIN_OBJECT_KEYS.has(k) && typeof v === "object" && !Array.isArray(v)) {
+        const nested = sanitizePlainObjectForLineItem(v);
+        if (nested) cleaned[k] = nested;
         continue;
       }
       if (k === "summary" && Array.isArray(v)) {
@@ -81,6 +155,7 @@ function sanitizeLineItemsForPersistence(raw) {
           label: String(x?.label || "").slice(0, 120),
           value: String(x?.value || "").slice(0, 400),
         }));
+        continue;
       }
     }
     if (Object.keys(cleaned).length) out.push(cleaned);
