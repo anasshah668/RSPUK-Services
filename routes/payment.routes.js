@@ -22,6 +22,72 @@ const toMinorUnits = (amount) => {
   return Math.round(value * 100);
 };
 
+const CHECKOUT_LINE_ALLOWED_KEYS = new Set([
+  "id",
+  "name",
+  "title",
+  "type",
+  "quantity",
+  "price",
+  "category",
+  "image",
+  "size",
+  "designOption",
+  "deliveryOption",
+  "material",
+  "sidesPrinted",
+  "lamination",
+  "roundCorners",
+  "selectedAttributes",
+  "summary",
+  "description",
+  "artworkAttached",
+  "artworkPreviewUrl",
+  "paymentMethod",
+  "vatInclusive",
+  "productType",
+]);
+
+/** Strip huge / unsafe payloads; keep what production needs to fulfil the order. */
+function sanitizeLineItemsForPersistence(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const row of raw.slice(0, 60)) {
+    if (!row || typeof row !== "object") continue;
+    const cleaned = {};
+    for (const [k, v] of Object.entries(row)) {
+      if (!CHECKOUT_LINE_ALLOWED_KEYS.has(k)) continue;
+      if (v == null) continue;
+      if (typeof v === "string") {
+        if (v.startsWith("data:")) continue;
+        if (v.length > 6000) continue;
+        cleaned[k] = v;
+        continue;
+      }
+      if (typeof v === "number" && Number.isFinite(v)) {
+        cleaned[k] = v;
+        continue;
+      }
+      if (typeof v === "boolean") {
+        cleaned[k] = v;
+        continue;
+      }
+      if (k === "selectedAttributes" && typeof v === "object" && !Array.isArray(v)) {
+        cleaned[k] = { ...v };
+        continue;
+      }
+      if (k === "summary" && Array.isArray(v)) {
+        cleaned[k] = v.slice(0, 40).map((x) => ({
+          label: String(x?.label || "").slice(0, 120),
+          value: String(x?.value || "").slice(0, 400),
+        }));
+      }
+    }
+    if (Object.keys(cleaned).length) out.push(cleaned);
+  }
+  return out;
+}
+
 /**
  * Checkout session → one-time verified token → `/payments/authorizations` with `card/checkout` + `tokenHref`.
  * Authorizations do not accept `sessionHref` alone for this flow.
@@ -366,7 +432,10 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
       customerInfo = {},
       billingAddress = {},
       orderDetails = {},
+      lineItems: lineItemsRaw,
     } = req.body || {};
+
+    const lineItems = sanitizeLineItemsForPersistence(lineItemsRaw);
 
     const sessionInput = sessionHrefFromBody || sessionState;
     if (!sessionInput && !trim(String(tokenHrefFromBody || ""))) {
@@ -570,6 +639,7 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
       },
       orderDetails:
         orderDetails && typeof orderDetails === "object" ? orderDetails : {},
+      lineItems,
       worldpay: {
         outcome: data?.outcome,
         paymentStatus: data?.paymentStatus,
@@ -592,6 +662,12 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
       await Order.create({
         user: req.user?._id || undefined,
         items: [],
+        checkoutContext: {
+          source: "worldpay-checkout",
+          lineItems,
+          orderDetails:
+            orderDetails && typeof orderDetails === "object" ? orderDetails : {},
+        },
         shippingAddress: {
           name: trim(customerInfo.name),
           street: addr1,

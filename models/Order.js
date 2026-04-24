@@ -95,6 +95,11 @@ const orderSchema = new mongoose.Schema({
   trackingNumber: {
     type: String,
   },
+  /** Paid checkout / basket snapshot when `items` is empty or for fulfilment notes (Worldpay, etc.). */
+  checkoutContext: {
+    type: mongoose.Schema.Types.Mixed,
+    default: undefined,
+  },
 }, {
   timestamps: true,
 });

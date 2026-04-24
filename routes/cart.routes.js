@@ -132,7 +132,7 @@ router.delete("/", withCart, async (req, res) => {
 
 router.post("/items", withCart, async (req, res) => {
   try {
-    const { item, quantity = 1 } = req.body || {};
+    const { item, quantity } = req.body || {};
     if (
       !item ||
       typeof item !== "object" ||
@@ -142,7 +142,16 @@ router.post("/items", withCart, async (req, res) => {
       return res.status(400).json({ message: "item with id is required" });
     }
 
-    const qty = Math.max(1, Math.floor(Number(quantity)) || 1);
+    const qty = Math.max(
+      1,
+      Math.floor(
+        Number(
+          quantity !== undefined && quantity !== null && quantity !== ""
+            ? quantity
+            : item?.quantity,
+        ) || 1,
+      ),
+    );
     const cart = req.cart;
     const pid = String(item.id);
 
@@ -150,9 +159,12 @@ router.post("/items", withCart, async (req, res) => {
     if (existing) {
       existing.quantity += qty;
     } else {
+      const payload =
+        item && typeof item === "object" ? { ...item } : {};
+      delete payload.quantity;
       cart.items.push({
         lineId: randomUUID(),
-        payload: item,
+        payload,
         quantity: qty,
       });
     }

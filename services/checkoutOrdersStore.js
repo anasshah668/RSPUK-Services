@@ -98,6 +98,8 @@ export function normalizeCheckoutRowForAdmin(row) {
     user: row.userId ? { _id: row.userId, name: null, email: null } : null,
     customer: row.customer,
     orderDetails: row.orderDetails,
+    /** Full basket / product selections (sanitized at persist time). */
+    lineItems: Array.isArray(row.lineItems) ? row.lineItems : [],
     orderReference: row.orderReference,
     trackingNumber: row.trackingId,
     trackingId: row.trackingId,
