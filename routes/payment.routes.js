@@ -56,6 +56,7 @@ const CHECKOUT_LINE_ALLOWED_KEYS = new Set([
   "encryptedProductId",
   "thirdPartyProductKey",
   "notes",
+  "productOptions",
   /** Explicit Product Detail snapshot (size, delivery, attributes, business card fields). */
   "selectionSnapshot",
 ]);
@@ -156,6 +157,13 @@ function sanitizeLineItemsForPersistence(raw) {
       }
       if (k === "summary" && Array.isArray(v)) {
         cleaned[k] = v.slice(0, 40).map((x) => ({
+          label: String(x?.label || "").slice(0, 120),
+          value: String(x?.value || "").slice(0, 400),
+        }));
+        continue;
+      }
+      if (k === "productOptions" && Array.isArray(v)) {
+        cleaned[k] = v.slice(0, 80).map((x) => ({
           label: String(x?.label || "").slice(0, 120),
           value: String(x?.value || "").slice(0, 400),
         }));
