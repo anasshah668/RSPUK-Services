@@ -82,4 +82,72 @@ export const uploadMultipleToCloudinary = async (files, folder = 'printing-platf
   return Promise.all(uploadPromises);
 };
 
+// Multer for artwork uploads (images + PDFs, larger max size)
+const ARTWORK_ALLOWED_MIME = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'application/pdf',
+]);
+
+export const artworkUpload = multer({
+  storage,
+  limits: {
+    // Tradeprint accepts large artwork; cap at 50MB to protect the server.
+    fileSize: 50 * 1024 * 1024,
+  },
+  fileFilter: (req, file, cb) => {
+    if (ARTWORK_ALLOWED_MIME.has(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only JPEG, PNG, GIF, WebP, and PDF are allowed.'));
+    }
+  },
+});
+
+// Upload an artwork buffer (image or PDF) to Cloudinary as `auto`
+// so non-image formats like PDFs are accepted.
+export const uploadArtworkToCloudinary = (buffer, originalName, folder = 'printing-platform/artwork') => {
+  return new Promise((resolve, reject) => {
+    if (!buffer || buffer.length === 0) {
+      return reject(new Error('File buffer is empty'));
+    }
+
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder,
+        resource_type: 'auto',
+        use_filename: true,
+        unique_filename: true,
+        filename_override: originalName || undefined,
+      },
+      (error, result) => {
+        if (error) {
+          console.error('Cloudinary artwork upload error:', error);
+          reject(new Error(`Cloudinary upload failed: ${error.message}`));
+        } else {
+          resolve({
+            url: result.secure_url,
+            publicId: result.public_id,
+            resourceType: result.resource_type,
+            format: result.format,
+            bytes: result.bytes,
+            originalFilename: result.original_filename,
+          });
+        }
+      }
+    );
+
+    const stream = Readable.from(buffer);
+    stream.pipe(uploadStream);
+
+    stream.on('error', (err) => {
+      console.error('Stream error:', err);
+      reject(new Error(`Stream error: ${err.message}`));
+    });
+  });
+};
+
 export default cloudinary;
