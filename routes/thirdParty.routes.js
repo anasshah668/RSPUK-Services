@@ -1,7 +1,7 @@
-import express from 'express';
-import { admin, protect } from '../middleware/auth.js';
-import Product from '../models/Product.js';
-import Category from '../models/Category.js';
+import express from "express";
+import { admin, protect } from "../middleware/auth.js";
+import Product from "../models/Product.js";
+import Category from "../models/Category.js";
 import {
   fetchThirdPartyProductAttributes,
   fetchThirdPartyProductAttributesByName,
@@ -9,49 +9,53 @@ import {
   fetchThirdPartyQuantities,
   fetchThirdPartyProductPrices,
   getThirdPartyToken,
-} from '../services/thirdPartyAuth.service.js';
+  validateThirdPartyOrder,
+  placeThirdPartyOrder,
+} from "../services/thirdPartyAuth.service.js";
 
 const router = express.Router();
 const ALLOWED_PRODUCT_KEYWORDS = [
-  'business cards',
-  'flyers',
-  'leaflets',
-  'brochures',
-  'menus',
-  'calendars',
-  'stickers',
+  "business cards",
+  "flyers",
+  "leaflets",
+  "brochures",
+  "menus",
+  "calendars",
+  "stickers",
 ];
 
-const getCategoryFromName = (name = '') => {
+const getCategoryFromName = (name = "") => {
   const normalized = String(name).toLowerCase();
-  if (normalized.includes('business card')) return 'business-cards';
-  if (normalized.includes('flyer')) return 'flyers';
-  if (normalized.includes('leaflet')) return 'leaflets';
-  if (normalized.includes('brochure')) return 'brochures';
-  if (normalized.includes('menu')) return 'menus';
-  if (normalized.includes('calendar')) return 'calendars';
-  if (normalized.includes('sticker')) return 'stickers';
-  return 'third-party';
+  if (normalized.includes("business card")) return "business-cards";
+  if (normalized.includes("flyer")) return "flyers";
+  if (normalized.includes("leaflet")) return "leaflets";
+  if (normalized.includes("brochure")) return "brochures";
+  if (normalized.includes("menu")) return "menus";
+  if (normalized.includes("calendar")) return "calendars";
+  if (normalized.includes("sticker")) return "stickers";
+  return "third-party";
 };
 
-const getCategoryDisplayName = (categorySlug = '') => {
-  if (!categorySlug) return 'Third Party';
+const getCategoryDisplayName = (categorySlug = "") => {
+  if (!categorySlug) return "Third Party";
   return String(categorySlug)
-    .split('-')
+    .split("-")
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
+    .join(" ");
 };
 
 const syncThirdPartyProducts = async ({ forceRefresh = false } = {}) => {
   const data = await fetchThirdPartyProductAttributes({ forceRefresh });
   const filteredProducts = (data.products || []).filter((product) => {
-    const name = String(product?.name || '').toLowerCase();
+    const name = String(product?.name || "").toLowerCase();
     return ALLOWED_PRODUCT_KEYWORDS.some((keyword) => name.includes(keyword));
   });
 
   // Ensure categories exist in Category table so they appear in admin category management.
-  const uniqueCategorySlugs = [...new Set(filteredProducts.map((p) => getCategoryFromName(p.name)))];
+  const uniqueCategorySlugs = [
+    ...new Set(filteredProducts.map((p) => getCategoryFromName(p.name))),
+  ];
   const upsertedCategories = await Promise.all(
     uniqueCategorySlugs.map(async (categorySlug, index) =>
       Category.findOneAndUpdate(
@@ -67,9 +71,9 @@ const syncThirdPartyProducts = async ({ forceRefresh = false } = {}) => {
             order: 100 + index,
           },
         },
-        { upsert: true, new: true }
-      )
-    )
+        { upsert: true, new: true },
+      ),
+    ),
   );
 
   const upsertedProducts = await Promise.all(
@@ -80,27 +84,27 @@ const syncThirdPartyProducts = async ({ forceRefresh = false } = {}) => {
         category: getCategoryFromName(tpProduct.name),
         basePrice: 0,
         isActive: true,
-        source: 'third-party',
+        source: "third-party",
         thirdPartyProductKey: tpProduct.productKey || null,
         thirdPartyAttributes: tpProduct.attributes || {},
       };
 
       return Product.findOneAndUpdate(
-        { name: tpProduct.name, source: 'third-party' },
+        { name: tpProduct.name, source: "third-party" },
         {
           $set: update,
           $setOnInsert: {
             variants: [],
             features: [],
             // Keep a dedicated image field for admin upload/edit
-            productImage: { url: '', publicId: '' },
+            productImage: { url: "", publicId: "" },
             // Keep legacy images array compatible with existing UI
             images: [],
           },
         },
-        { upsert: true, new: true }
+        { upsert: true, new: true },
       );
-    })
+    }),
   );
 
   return {
@@ -114,12 +118,12 @@ const syncThirdPartyProducts = async ({ forceRefresh = false } = {}) => {
 // @route   POST /api/third-party/auth/login
 // @desc    Authenticate with third-party API and cache token
 // @access  Private/Admin
-router.post('/auth/login', protect, admin, async (req, res) => {
+router.post("/auth/login", protect, admin, async (req, res) => {
   try {
     const token = await getThirdPartyToken({ forceRefresh: true });
     res.json({
       success: true,
-      message: 'Third-party authentication successful',
+      message: "Third-party authentication successful",
       tokenPreview: `${String(token).slice(0, 12)}...`,
     });
   } catch (error) {
@@ -130,7 +134,7 @@ router.post('/auth/login', protect, admin, async (req, res) => {
 // @route   GET /api/third-party/auth/token
 // @desc    Ensure token is available for subsequent API calls
 // @access  Private/Admin
-router.get('/auth/token', protect, admin, async (req, res) => {
+router.get("/auth/token", protect, admin, async (req, res) => {
   try {
     const token = await getThirdPartyToken();
     res.json({
@@ -145,10 +149,12 @@ router.get('/auth/token', protect, admin, async (req, res) => {
 // @route   GET /api/third-party/products/attributes
 // @desc    Fetch product attributes from third-party API using backend token
 // @access  Public (safe proxy response)
-router.get('/products/attributes', async (req, res) => {
+router.get("/products/attributes", async (req, res) => {
   try {
-    const forceRefresh = String(req.query.forceRefresh || '').toLowerCase() === 'true';
-    const { raw, filteredProducts, categoriesSynced, syncedCount } = await syncThirdPartyProducts({ forceRefresh });
+    const forceRefresh =
+      String(req.query.forceRefresh || "").toLowerCase() === "true";
+    const { raw, filteredProducts, categoriesSynced, syncedCount } =
+      await syncThirdPartyProducts({ forceRefresh });
 
     res.json({
       success: true,
@@ -165,13 +171,15 @@ router.get('/products/attributes', async (req, res) => {
 // @route   POST /api/third-party/products/sync
 // @desc    Manually sync selected third-party products into DB
 // @access  Private/Admin
-router.post('/products/sync', protect, admin, async (req, res) => {
+router.post("/products/sync", protect, admin, async (req, res) => {
   try {
-    const forceRefresh = String(req.query.forceRefresh || '').toLowerCase() === 'true';
-    const { filteredProducts, categoriesSynced, syncedCount } = await syncThirdPartyProducts({ forceRefresh });
+    const forceRefresh =
+      String(req.query.forceRefresh || "").toLowerCase() === "true";
+    const { filteredProducts, categoriesSynced, syncedCount } =
+      await syncThirdPartyProducts({ forceRefresh });
     res.json({
       success: true,
-      message: 'Third-party products synced successfully',
+      message: "Third-party products synced successfully",
       products: filteredProducts,
       categoriesSynced,
       syncedCount,
@@ -184,10 +192,14 @@ router.post('/products/sync', protect, admin, async (req, res) => {
 // @route   GET /api/third-party/products/attributes/:productName
 // @desc    Fetch attributes for a specific third-party product name
 // @access  Public (safe proxy response)
-router.get('/products/attributes/:productName', async (req, res) => {
+router.get("/products/attributes/:productName", async (req, res) => {
   try {
-    const forceRefresh = String(req.query.forceRefresh || '').toLowerCase() === 'true';
-    const data = await fetchThirdPartyProductAttributesByName(req.params.productName, { forceRefresh });
+    const forceRefresh =
+      String(req.query.forceRefresh || "").toLowerCase() === "true";
+    const data = await fetchThirdPartyProductAttributesByName(
+      req.params.productName,
+      { forceRefresh },
+    );
     res.json({
       success: true,
       result: data.raw,
@@ -201,14 +213,16 @@ router.get('/products/attributes/:productName', async (req, res) => {
 // @route   POST /api/third-party/products/prices
 // @desc    Fetch prices for a product based on production attributes
 // @access  Public (safe proxy response)
-router.post('/products/prices', async (req, res) => {
+router.post("/products/prices", async (req, res) => {
   try {
-    const forceRefresh = String(req.query.forceRefresh || '').toLowerCase() === 'true';
-    const { productId, productionData, quantity, serviceLevel } = req.body || {};
+    const forceRefresh =
+      String(req.query.forceRefresh || "").toLowerCase() === "true";
+    const { productId, productionData, quantity, serviceLevel } =
+      req.body || {};
 
     const data = await fetchThirdPartyProductPrices(
       { productId, productionData, quantity, serviceLevel },
-      { forceRefresh }
+      { forceRefresh },
     );
 
     res.json({
@@ -224,9 +238,10 @@ router.post('/products/prices', async (req, res) => {
 // @route   POST /api/third-party/products/expected-delivery-date
 // @desc    Fetch expected delivery date based on product + production payload
 // @access  Public (safe proxy response)
-router.post('/products/expected-delivery-date', async (req, res) => {
+router.post("/products/expected-delivery-date", async (req, res) => {
   try {
-    const forceRefresh = String(req.query.forceRefresh || '').toLowerCase() === 'true';
+    const forceRefresh =
+      String(req.query.forceRefresh || "").toLowerCase() === "true";
     const {
       productId,
       productionData,
@@ -245,7 +260,7 @@ router.post('/products/expected-delivery-date', async (req, res) => {
         artworkService,
         deliveryAddress,
       },
-      { forceRefresh }
+      { forceRefresh },
     );
 
     res.json({
@@ -261,14 +276,15 @@ router.post('/products/expected-delivery-date', async (req, res) => {
 // @route   POST /api/third-party/products/quantities
 // @desc    Fetch available quantities for a product based on production data and service level
 // @access  Public (safe proxy response)
-router.post('/products/quantities', async (req, res) => {
+router.post("/products/quantities", async (req, res) => {
   try {
-    const forceRefresh = String(req.query.forceRefresh || '').toLowerCase() === 'true';
+    const forceRefresh =
+      String(req.query.forceRefresh || "").toLowerCase() === "true";
     const { productId, serviceLevel, productionData } = req.body || {};
 
     const data = await fetchThirdPartyQuantities(
       { productId, serviceLevel, productionData },
-      { forceRefresh }
+      { forceRefresh },
     );
 
     res.json({
@@ -281,5 +297,34 @@ router.post('/products/quantities', async (req, res) => {
   }
 });
 
-export default router;
+// @route   POST /api/third-party/validate/orders
+// @desc    Validate an order payload with the third-party API before sending
+// @access  Private
+router.post("/validate/orders", protect, async (req, res) => {
+  try {
+    const forceRefresh =
+      String(req.query.forceRefresh || "").toLowerCase() === "true";
+    const data = await validateThirdPartyOrder(req.body, { forceRefresh });
 
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route   POST /api/third-party/orders
+// @desc    Place an order with the third-party API
+// @access  Private/Admin
+router.post("/orders", protect, admin, async (req, res) => {
+  try {
+    const forceRefresh =
+      String(req.query.forceRefresh || "").toLowerCase() === "true";
+    const data = await placeThirdPartyOrder(req.body, { forceRefresh });
+
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+export default router;

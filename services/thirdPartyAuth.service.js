@@ -12,10 +12,12 @@ const getRequiredEnv = (key) => {
 };
 
 const getAuthConfig = () => {
-  const baseUrl = getRequiredEnv('THIRD_PARTY_BASE_URL').replace(/\/+$/, '');
-  const username = getRequiredEnv('THIRD_PARTY_USERNAME');
-  const password = getRequiredEnv('THIRD_PARTY_PASSWORD');
-  const tokenTtlSeconds = Number(process.env.THIRD_PARTY_TOKEN_TTL_SECONDS || 3000);
+  const baseUrl = getRequiredEnv("THIRD_PARTY_BASE_URL").replace(/\/+$/, "");
+  const username = getRequiredEnv("THIRD_PARTY_USERNAME");
+  const password = getRequiredEnv("THIRD_PARTY_PASSWORD");
+  const tokenTtlSeconds = Number(
+    process.env.THIRD_PARTY_TOKEN_TTL_SECONDS || 3000,
+  );
 
   return { baseUrl, username, password, tokenTtlSeconds };
 };
@@ -25,18 +27,19 @@ const isTokenValid = () => {
 };
 
 const parseDurationToSeconds = (value, fallbackSeconds) => {
-  if (value === null || value === undefined || value === '') return fallbackSeconds;
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (value === null || value === undefined || value === "")
+    return fallbackSeconds;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
   const str = String(value).trim().toLowerCase();
   if (/^\d+$/.test(str)) return Number(str);
   const match = str.match(/^(\d+)\s*(s|m|h|d)$/);
   if (!match) return fallbackSeconds;
   const amount = Number(match[1]);
   const unit = match[2];
-  if (unit === 's') return amount;
-  if (unit === 'm') return amount * 60;
-  if (unit === 'h') return amount * 3600;
-  if (unit === 'd') return amount * 86400;
+  if (unit === "s") return amount;
+  if (unit === "m") return amount * 60;
+  if (unit === "h") return amount * 3600;
+  if (unit === "d") return amount * 86400;
   return fallbackSeconds;
 };
 
@@ -49,9 +52,9 @@ export const loginThirdParty = async () => {
   const loginUrl = `${baseUrl}/v2/login`;
 
   const response = await fetch(loginUrl, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({ username, password }),
   });
@@ -59,18 +62,30 @@ export const loginThirdParty = async () => {
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    const message = payload?.message || payload?.error || `Third-party login failed with ${response.status}`;
+    const message =
+      payload?.message ||
+      payload?.error ||
+      `Third-party login failed with ${response.status}`;
     throw new Error(message);
   }
 
   const result = payload?.result || payload?.data || payload;
   const token = result?.token || result?.accessToken || result?.access_token;
   if (!token) {
-    throw new Error('Third-party login succeeded but token was not found in response');
+    throw new Error(
+      "Third-party login succeeded but token was not found in response",
+    );
   }
 
-  const expiresInRaw = result?.expiresIn || result?.expires_in || payload?.expiresIn || payload?.expires_in;
-  const expiresInSeconds = parseDurationToSeconds(expiresInRaw, tokenTtlSeconds);
+  const expiresInRaw =
+    result?.expiresIn ||
+    result?.expires_in ||
+    payload?.expiresIn ||
+    payload?.expires_in;
+  const expiresInSeconds = parseDurationToSeconds(
+    expiresInRaw,
+    tokenTtlSeconds,
+  );
   const safeExpiryMs = Math.max(30, expiresInSeconds - 30) * 1000; // refresh slightly early
   tokenCache = {
     value: token,
@@ -88,7 +103,7 @@ export const getThirdPartyToken = async ({ forceRefresh = false } = {}) => {
 };
 
 const normalizeAttributesResult = (result) => {
-  if (!result || typeof result !== 'object') return [];
+  if (!result || typeof result !== "object") return [];
   return Object.entries(result).map(([productName, data]) => {
     const values = data?.values || {};
     return {
@@ -99,16 +114,18 @@ const normalizeAttributesResult = (result) => {
   });
 };
 
-export const fetchThirdPartyProductAttributes = async ({ forceRefresh = false } = {}) => {
+export const fetchThirdPartyProductAttributes = async ({
+  forceRefresh = false,
+} = {}) => {
   const { baseUrl } = getAuthConfig();
   let token = await getThirdPartyToken({ forceRefresh });
   const endpoint = `${baseUrl}/v2/products-v2/attributes-v2`;
 
   const callApi = async (authToken) => {
     const response = await fetch(endpoint, {
-      method: 'GET',
+      method: "GET",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         Authorization: `Bearer ${authToken}`,
       },
     });
@@ -125,7 +142,10 @@ export const fetchThirdPartyProductAttributes = async ({ forceRefresh = false } 
   }
 
   if (!response.ok) {
-    const message = payload?.message || payload?.error || `Failed to fetch product attributes (${response.status})`;
+    const message =
+      payload?.message ||
+      payload?.error ||
+      `Failed to fetch product attributes (${response.status})`;
     throw new Error(message);
   }
 
@@ -137,9 +157,12 @@ export const fetchThirdPartyProductAttributes = async ({ forceRefresh = false } 
   };
 };
 
-export const fetchThirdPartyProductAttributesByName = async (productName, { forceRefresh = false } = {}) => {
+export const fetchThirdPartyProductAttributesByName = async (
+  productName,
+  { forceRefresh = false } = {},
+) => {
   if (!productName) {
-    throw new Error('productName is required');
+    throw new Error("productName is required");
   }
 
   const { baseUrl } = getAuthConfig();
@@ -149,9 +172,9 @@ export const fetchThirdPartyProductAttributesByName = async (productName, { forc
 
   const callApi = async (authToken) => {
     const response = await fetch(endpoint, {
-      method: 'GET',
+      method: "GET",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         Authorization: `Bearer ${authToken}`,
       },
     });
@@ -167,7 +190,10 @@ export const fetchThirdPartyProductAttributesByName = async (productName, { forc
   }
 
   if (!response.ok) {
-    const message = payload?.message || payload?.error || `Failed to fetch product attributes (${response.status})`;
+    const message =
+      payload?.message ||
+      payload?.error ||
+      `Failed to fetch product attributes (${response.status})`;
     throw new Error(message);
   }
 
@@ -185,19 +211,14 @@ export const fetchThirdPartyProductAttributesByName = async (productName, { forc
 };
 
 export const fetchThirdPartyProductPrices = async (
-  {
-    productId,
-    productionData,
-    quantity,
-    serviceLevel,
-  },
-  { forceRefresh = false } = {}
+  { productId, productionData, quantity, serviceLevel },
+  { forceRefresh = false } = {},
 ) => {
   if (!productId) {
-    throw new Error('productId is required');
+    throw new Error("productId is required");
   }
-  if (!productionData || typeof productionData !== 'object') {
-    throw new Error('productionData is required');
+  if (!productionData || typeof productionData !== "object") {
+    throw new Error("productionData is required");
   }
 
   const { baseUrl } = getAuthConfig();
@@ -218,9 +239,9 @@ export const fetchThirdPartyProductPrices = async (
 
   const callApi = async (authToken) => {
     const response = await fetch(endpoint, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         Authorization: `Bearer ${authToken}`,
       },
       body: JSON.stringify(body),
@@ -237,7 +258,10 @@ export const fetchThirdPartyProductPrices = async (
   }
 
   if (!response.ok) {
-    const message = payload?.message || payload?.error || `Failed to fetch product prices (${response.status})`;
+    const message =
+      payload?.message ||
+      payload?.error ||
+      `Failed to fetch product prices (${response.status})`;
     throw new Error(message);
   }
 
@@ -268,13 +292,13 @@ export const fetchThirdPartyExpectedDeliveryDate = async (
     artworkService,
     deliveryAddress,
   },
-  { forceRefresh = false } = {}
+  { forceRefresh = false } = {},
 ) => {
   if (!productId) {
-    throw new Error('productId is required');
+    throw new Error("productId is required");
   }
-  if (!productionData || typeof productionData !== 'object') {
-    throw new Error('productionData is required');
+  if (!productionData || typeof productionData !== "object") {
+    throw new Error("productionData is required");
   }
 
   const { baseUrl } = getAuthConfig();
@@ -292,9 +316,9 @@ export const fetchThirdPartyExpectedDeliveryDate = async (
 
   const callApi = async (authToken) => {
     const response = await fetch(endpoint, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         Authorization: `Bearer ${authToken}`,
       },
       body: JSON.stringify(body),
@@ -311,7 +335,10 @@ export const fetchThirdPartyExpectedDeliveryDate = async (
   }
 
   if (!response.ok) {
-    const message = payload?.message || payload?.error || `Failed to fetch expected delivery date (${response.status})`;
+    const message =
+      payload?.message ||
+      payload?.error ||
+      `Failed to fetch expected delivery date (${response.status})`;
     throw new Error(message);
   }
 
@@ -328,18 +355,14 @@ export const fetchThirdPartyExpectedDeliveryDate = async (
 };
 
 export const fetchThirdPartyQuantities = async (
-  {
-    productId,
-    serviceLevel,
-    productionData,
-  },
-  { forceRefresh = false } = {}
+  { productId, serviceLevel, productionData },
+  { forceRefresh = false } = {},
 ) => {
   if (!productId) {
-    throw new Error('productId is required');
+    throw new Error("productId is required");
   }
-  if (!productionData || typeof productionData !== 'object') {
-    throw new Error('productionData is required');
+  if (!productionData || typeof productionData !== "object") {
+    throw new Error("productionData is required");
   }
   const { baseUrl } = getAuthConfig();
   let token = await getThirdPartyToken({ forceRefresh });
@@ -349,9 +372,9 @@ export const fetchThirdPartyQuantities = async (
 
   const callApi = async (authToken) => {
     const response = await fetch(endpoint, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         Authorization: `Bearer ${authToken}`,
       },
       body: JSON.stringify(body),
@@ -368,7 +391,10 @@ export const fetchThirdPartyQuantities = async (
   }
 
   if (!response.ok) {
-    const message = payload?.message || payload?.error || `Failed to fetch product quantities (${response.status})`;
+    const message =
+      payload?.message ||
+      payload?.error ||
+      `Failed to fetch product quantities (${response.status})`;
     throw new Error(message);
   }
 
@@ -376,6 +402,128 @@ export const fetchThirdPartyQuantities = async (
   return {
     success: payload?.success !== false,
     raw: result,
-    quantities: result.filter((n) => Number.isFinite(Number(n))).map((n) => Number(n)),
+    quantities: result
+      .filter((n) => Number.isFinite(Number(n)))
+      .map((n) => Number(n)),
+  };
+};
+
+export const validateThirdPartyOrder = async (
+  orderPayload,
+  { forceRefresh = false } = {},
+) => {
+  if (
+    !orderPayload ||
+    typeof orderPayload !== "object" ||
+    Array.isArray(orderPayload)
+  ) {
+    throw new Error("Order validation payload is required");
+  }
+
+  const { baseUrl } = getAuthConfig();
+  let token = await getThirdPartyToken({ forceRefresh });
+  const endpoint = `${baseUrl}/v2/validate/orders`;
+
+  const callApi = async (authToken) => {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(orderPayload),
+    });
+    const payload = await response.json().catch(() => ({}));
+    return { response, payload };
+  };
+
+  let { response, payload } = await callApi(token);
+
+  if (response.status === 401) {
+    token = await getThirdPartyToken({ forceRefresh: true });
+    ({ response, payload } = await callApi(token));
+  }
+
+  if (!response.ok && payload?.success !== false) {
+    const message =
+      payload?.message ||
+      payload?.error ||
+      `Failed to validate order (${response.status})`;
+    throw new Error(message);
+  }
+
+  return {
+    success: payload?.success === true,
+    result: payload?.result || {},
+    ...(payload?.success === false && {
+      errorMessage:
+        payload?.errorMessage || payload?.message || "Validation failed",
+      errorDetails: Array.isArray(payload?.errorDetails)
+        ? payload.errorDetails
+        : [],
+    }),
+  };
+};
+
+export const placeThirdPartyOrder = async (
+  orderPayload,
+  { forceRefresh = false } = {},
+) => {
+  if (
+    !orderPayload ||
+    typeof orderPayload !== "object" ||
+    Array.isArray(orderPayload)
+  ) {
+    throw new Error("Order payload is required");
+  }
+  if (
+    !Array.isArray(orderPayload.orderItems) ||
+    orderPayload.orderItems.length === 0
+  ) {
+    throw new Error("orderItems is required");
+  }
+
+  const { baseUrl } = getAuthConfig();
+  let token = await getThirdPartyToken({ forceRefresh });
+  const endpoint = `${baseUrl}/v2/orders/`;
+
+  const callApi = async (authToken) => {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(orderPayload),
+    });
+    const payload = await response.json().catch(() => ({}));
+    return { response, payload };
+  };
+
+  let { response, payload } = await callApi(token);
+
+  if (response.status === 401) {
+    token = await getThirdPartyToken({ forceRefresh: true });
+    ({ response, payload } = await callApi(token));
+  }
+
+  if (!response.ok && payload?.success !== false) {
+    const message =
+      payload?.message ||
+      payload?.error ||
+      `Failed to place order (${response.status})`;
+    throw new Error(message);
+  }
+
+  return {
+    success: payload?.success === true,
+    result: payload?.result || {},
+    ...(payload?.success === false && {
+      errorMessage:
+        payload?.errorMessage || payload?.message || "Order placement failed",
+      errorDetails: Array.isArray(payload?.errorDetails)
+        ? payload.errorDetails
+        : [],
+    }),
   };
 };
