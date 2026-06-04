@@ -7,6 +7,11 @@ import {
   getNeonPricingSettings,
   updateNeonPricingSettings,
 } from "../controllers/neonPricing.controller.js";
+import {
+  listFeaturedSignagePricingAdmin,
+  getFeaturedSignagePricingAdmin,
+  updateFeaturedSignagePricingAdmin,
+} from "../controllers/featuredSignagePricing.controller.js";
 import { protect, admin } from "../middleware/auth.js";
 import { upload, uploadMultipleToCloudinary } from "../config/cloudinary.js";
 import {
@@ -389,6 +394,10 @@ router.put("/orders/:id/status", async (req, res) => {
 
 router.get("/neon-pricing", getNeonPricingSettings);
 router.put("/neon-pricing", updateNeonPricingSettings);
+
+router.get("/featured-signage-pricing", listFeaturedSignagePricingAdmin);
+router.get("/featured-signage-pricing/:categorySlug", getFeaturedSignagePricingAdmin);
+router.put("/featured-signage-pricing/:categorySlug", updateFeaturedSignagePricingAdmin);
 
 // ==================== ANALYTICS ====================
 

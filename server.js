@@ -16,6 +16,7 @@ import thirdPartyRoutes from './routes/thirdParty.routes.js';
 import paymentRoutes from './routes/payment.routes.js';
 import cartRoutes from './routes/cart.routes.js';
 import neonPricingRoutes from './routes/neonPricing.routes.js';
+import featuredSignagePricingRoutes from './routes/featuredSignagePricing.routes.js';
 import uploadsRoutes from './routes/uploads.routes.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requireDatabase } from './middleware/requireDatabase.js';
@@ -88,6 +89,7 @@ app.use('/api/third-party', thirdPartyRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/neon-pricing', neonPricingRoutes);
+app.use('/api/featured-signage-pricing', featuredSignagePricingRoutes);
 app.use('/api/uploads', uploadsRoutes);
 
 // Error handling middleware
