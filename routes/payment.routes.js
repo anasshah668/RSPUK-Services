@@ -5,7 +5,11 @@ import { sendPaymentReceiptEmail } from "../services/receiptMail.js";
 import { optionalAuth } from "../middleware/optionalAuth.js";
 import Cart from "../models/Cart.js";
 import Order from "../models/Order.js";
+import DesignServiceRequest from "../models/DesignServiceRequest.js";
 import { buildWorldpayOrderDetail } from "../services/orderDetailSnapshot.js";
+import {
+  isValidDesignServiceChargeAmount,
+} from "../services/designServicePrice.js";
 
 const router = express.Router();
 
@@ -524,6 +528,34 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
 
     const lineItems = sanitizeLineItemsForPersistence(lineItemsRaw);
 
+    const designServiceRequestId = trim(
+      orderDetails?.designServiceRequestId || "",
+    );
+    let designServiceRequestDoc = null;
+    if (designServiceRequestId) {
+      if (!req.user?._id) {
+        return res.status(401).json({
+          message: "Login required to pay for a design service request.",
+        });
+      }
+      designServiceRequestDoc = await DesignServiceRequest.findOne({
+        _id: designServiceRequestId,
+        user: req.user._id,
+        paymentStatus: "pending",
+        status: "awaiting_payment",
+      });
+      if (!designServiceRequestDoc) {
+        return res.status(404).json({
+          message: "Design service request not found or already paid.",
+        });
+      }
+      if (!isValidDesignServiceChargeAmount(designServiceRequestDoc, amount)) {
+        return res.status(400).json({
+          message: `Invalid payment amount. Expected GBP ${Number(designServiceRequestDoc.priceAmount).toFixed(2)}.`,
+        });
+      }
+    }
+
     const sessionInput = sessionHrefFromBody || sessionState;
     if (!sessionInput && !trim(String(tokenHrefFromBody || ""))) {
       return res.status(400).json({
@@ -846,6 +878,24 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
       }
     } catch (cartErr) {
       console.error("[worldpay/charge] Failed to clear basket", cartErr);
+    }
+
+    if (designServiceRequestDoc) {
+      try {
+        designServiceRequestDoc.paymentStatus = "paid";
+        designServiceRequestDoc.status = "paid";
+        designServiceRequestDoc.paymentId = paymentId;
+        designServiceRequestDoc.orderReference = transactionReference;
+        designServiceRequestDoc.trackingId = trim(
+          savedOrderRow?.trackingId || generatedTrackingId,
+        );
+        await designServiceRequestDoc.save();
+      } catch (designErr) {
+        console.error(
+          "[worldpay/charge] Failed to update design service request",
+          designErr,
+        );
+      }
     }
 
     res.json({

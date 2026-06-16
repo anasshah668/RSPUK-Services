@@ -3,6 +3,10 @@ import SiteSetting from '../models/SiteSetting.js';
 import GalleryProject from '../models/GalleryProject.js';
 import { protect, admin } from '../middleware/auth.js';
 import { upload, uploadMultipleToCloudinary } from '../config/cloudinary.js';
+import {
+  getDesignServicePrice,
+  saveDesignServicePrice,
+} from '../services/designServicePrice.js';
 
 const router = express.Router();
 
@@ -51,6 +55,29 @@ router.put('/top-announcement', protect, admin, async (req, res) => {
     res.json(setting.value);
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+});
+
+// Public: read design service price
+router.get('/design-service-price', async (req, res) => {
+  try {
+    const pricing = await getDesignServicePrice();
+    res.json(pricing);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Admin: update design service price
+router.put('/design-service-price', protect, admin, async (req, res) => {
+  try {
+    const saved = await saveDesignServicePrice({
+      price: req.body?.price,
+      vatInclusive: req.body?.vatInclusive,
+    });
+    res.json(saved);
+  } catch (error) {
+    res.status(400).json({ message: error.message || 'Failed to save design service price' });
   }
 });
 
