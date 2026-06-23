@@ -16,6 +16,9 @@ export const FEATURED_PRICING_CATEGORIES = [
   { slug: 'one-way-vision', label: 'One Way Vision' },
   { slug: 'cut-vinyl', label: 'Cut Vinyl' },
   { slug: 'privacy-films', label: 'Privacy Films' },
+  { slug: 'cnc-router-cutting', label: 'CNC Router Cutting' },
+  { slug: 'fibre-laser-cutting', label: 'Fibre Laser Cutting' },
+  { slug: 'fibre-laser-welding', label: 'Fibre Laser Welding' },
 ];
 
 const commonFields = [

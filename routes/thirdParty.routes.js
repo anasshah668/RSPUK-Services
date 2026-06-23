@@ -14,6 +14,29 @@ import {
 } from "../services/thirdPartyAuth.service.js";
 
 const router = express.Router();
+const THIRD_PARTY_PRICE_MARKUP_RATE = 0.1;
+
+const applyThirdPartyPriceMarkup = (prices, markupRate = THIRD_PARTY_PRICE_MARKUP_RATE) => {
+  if (!Array.isArray(prices)) return [];
+
+  return prices.map((row) => ({
+    ...row,
+    prices: Array.isArray(row?.prices)
+      ? row.prices.map((entry) => {
+          const basePrice = Number(entry?.price);
+          if (!Number.isFinite(basePrice)) {
+            return entry;
+          }
+
+          return {
+            ...entry,
+            price: Math.round(basePrice * (1 + markupRate) * 100) / 100,
+          };
+        })
+      : [],
+  }));
+};
+
 const ALLOWED_PRODUCT_KEYWORDS = [
   "business cards",
   "flyers",
@@ -225,10 +248,12 @@ router.post("/products/prices", async (req, res) => {
       { forceRefresh },
     );
 
+    const prices = applyThirdPartyPriceMarkup(data.prices);
+
     res.json({
       success: true,
       result: data.raw,
-      prices: data.prices,
+      prices,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
