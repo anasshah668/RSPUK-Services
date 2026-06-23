@@ -19,7 +19,10 @@ router.get('/price', async (_req, res) => {
 
 router.get('/my', protect, async (req, res) => {
   try {
-    const requests = await DesignServiceRequest.find({ user: req.user._id })
+    const requests = await DesignServiceRequest.find({
+      user: req.user._id,
+      paymentStatus: 'paid',
+    })
       .sort({ createdAt: -1 })
       .lean();
     res.json({ requests });
@@ -43,6 +46,7 @@ router.post(
   [
     body('title').trim().notEmpty().withMessage('Title is required'),
     body('brief').trim().notEmpty().withMessage('Brief is required'),
+    body('customerName').trim().notEmpty().withMessage('Contact name is required'),
   ],
   async (req, res) => {
     try {
@@ -70,6 +74,12 @@ router.post(
         }
       }
 
+      const customerEmail = trim(req.body.customerEmail || req.user.email).toLowerCase();
+      const accountEmail = trim(req.user.email).toLowerCase();
+      if (customerEmail && accountEmail && customerEmail !== accountEmail) {
+        return res.status(400).json({ message: 'Contact email must match your account email.' });
+      }
+
       const requestDoc = await DesignServiceRequest.create({
         user: req.user._id,
         title: trim(req.body.title),
@@ -79,9 +89,12 @@ router.post(
         priceAmount: pricing.price,
         currency: pricing.currency,
         vatInclusive: pricing.vatInclusive,
-        customerName: trim(req.user.name),
-        customerEmail: trim(req.user.email),
-        customerPhone: trim(req.user.phone),
+        customerName: trim(req.body.customerName || req.user.name),
+        customerEmail: accountEmail,
+        customerPhone: trim(req.body.customerPhone || req.user.phone),
+        customerAddress: trim(req.body.customerAddress),
+        customerCity: trim(req.body.customerCity),
+        customerPostalCode: trim(req.body.customerPostalCode),
         paymentStatus: 'pending',
         status: 'awaiting_payment',
       });
@@ -95,10 +108,9 @@ router.post(
 
 router.get('/admin/all', protect, admin, async (req, res) => {
   try {
-    const { status, paymentStatus } = req.query;
-    const query = {};
+    const { status } = req.query;
+    const query = { paymentStatus: 'paid' };
     if (status) query.status = status;
-    if (paymentStatus) query.paymentStatus = paymentStatus;
 
     const requests = await DesignServiceRequest.find(query)
       .populate('user', 'name email phone')

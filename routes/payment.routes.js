@@ -531,13 +531,34 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
     const designServiceRequestId = trim(
       orderDetails?.designServiceRequestId || "",
     );
+    const hasDesignServiceLine = lineItems.some(
+      (item) => String(item?.type || "").toLowerCase() === "design-service",
+    );
+    const isDesignServiceCheckout =
+      Boolean(designServiceRequestId) || hasDesignServiceLine;
+
     let designServiceRequestDoc = null;
-    if (designServiceRequestId) {
+    if (isDesignServiceCheckout) {
       if (!req.user?._id) {
         return res.status(401).json({
-          message: "Login required to pay for a design service request.",
+          message: "Authentication required. Sign in to pay for design service.",
         });
       }
+
+      if (!designServiceRequestId) {
+        return res.status(400).json({
+          message: "Design service payment requires a valid designServiceRequestId.",
+        });
+      }
+
+      const accountEmail = trim(req.user.email).toLowerCase();
+      const payerEmail = trim(customerInfo.email).toLowerCase();
+      if (!payerEmail || !accountEmail || payerEmail !== accountEmail) {
+        return res.status(403).json({
+          message: "Payment email must match your signed-in account email.",
+        });
+      }
+
       designServiceRequestDoc = await DesignServiceRequest.findOne({
         _id: designServiceRequestId,
         user: req.user._id,
@@ -889,6 +910,24 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
         designServiceRequestDoc.trackingId = trim(
           savedOrderRow?.trackingId || generatedTrackingId,
         );
+        if (trim(customerInfo.name)) {
+          designServiceRequestDoc.customerName = trim(customerInfo.name);
+        }
+        if (trim(customerInfo.email)) {
+          designServiceRequestDoc.customerEmail = trim(customerInfo.email).toLowerCase();
+        }
+        if (trim(customerInfo.phone)) {
+          designServiceRequestDoc.customerPhone = trim(customerInfo.phone);
+        }
+        if (trim(customerInfo.address)) {
+          designServiceRequestDoc.customerAddress = trim(customerInfo.address);
+        }
+        if (trim(customerInfo.city)) {
+          designServiceRequestDoc.customerCity = trim(customerInfo.city);
+        }
+        if (trim(customerInfo.postalCode)) {
+          designServiceRequestDoc.customerPostalCode = trim(customerInfo.postalCode);
+        }
         await designServiceRequestDoc.save();
       } catch (designErr) {
         console.error(

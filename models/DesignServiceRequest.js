@@ -76,6 +76,9 @@ const designServiceRequestSchema = new mongoose.Schema(
     customerName: { type: String, default: '' },
     customerEmail: { type: String, default: '' },
     customerPhone: { type: String, default: '' },
+    customerAddress: { type: String, default: '' },
+    customerCity: { type: String, default: '' },
+    customerPostalCode: { type: String, default: '' },
   },
   { timestamps: true },
 );

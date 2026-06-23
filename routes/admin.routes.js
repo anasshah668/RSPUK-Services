@@ -428,6 +428,17 @@ router.get("/analytics", async (req, res) => {
       { $sort: { _id: 1 } },
     ]);
 
+    const usersByMonth = await User.aggregate([
+      { $match: { role: "user" } },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m", date: "$createdAt" } },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
     const totalUsers = await User.countDocuments({ role: "user" });
     const totalProducts = await Product.countDocuments();
     const totalQuotes = await Quote.countDocuments({ status: "new" });
@@ -442,6 +453,7 @@ router.get("/analytics", async (req, res) => {
       },
       ordersByStatus,
       revenueByMonth,
+      usersByMonth,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
