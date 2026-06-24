@@ -150,6 +150,7 @@ export const buildTradeprintOrderPayload = ({
         productId,
         fileUrls,
         withoutArtwork: fileUrls.length === 0,
+        artworkService: "Just Print",
         quantity: Math.max(1, Number(line.quantity) || 1),
         serviceLevel: getTradeprintServiceLevel(line),
         productionData: getTradeprintProductionData(line),
