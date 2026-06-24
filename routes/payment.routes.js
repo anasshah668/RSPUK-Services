@@ -7,6 +7,7 @@ import Cart from "../models/Cart.js";
 import Order from "../models/Order.js";
 import DesignServiceRequest from "../models/DesignServiceRequest.js";
 import { buildWorldpayOrderDetail } from "../services/orderDetailSnapshot.js";
+import { fulfillTradeprintCheckoutOrder } from "../services/tradeprintCheckoutFulfillment.js";
 import {
   isValidDesignServiceChargeAmount,
 } from "../services/designServicePrice.js";
@@ -59,6 +60,10 @@ const CHECKOUT_LINE_ALLOWED_KEYS = new Set([
   "sku",
   "encryptedProductId",
   "thirdPartyProductKey",
+  "source",
+  "fileUrls",
+  "withoutArtwork",
+  "serviceLevel",
   "notes",
   "productOptions",
   /** Explicit Product Detail snapshot (size, delivery, attributes, business card fields). */
@@ -171,6 +176,13 @@ function sanitizeLineItemsForPersistence(raw) {
           label: String(x?.label || "").slice(0, 120),
           value: String(x?.value || "").slice(0, 400),
         }));
+        continue;
+      }
+      if (k === "fileUrls" && Array.isArray(v)) {
+        cleaned[k] = v
+          .filter((url) => typeof url === "string" && /^https?:\/\//i.test(trim(url)))
+          .slice(0, 10)
+          .map((url) => trim(url).slice(0, 2000));
         continue;
       }
     }
@@ -937,6 +949,52 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
       }
     }
 
+    let tradeprintFulfillment = null;
+    try {
+      tradeprintFulfillment = await fulfillTradeprintCheckoutOrder({
+        lineItems,
+        customerInfo: persistedRow.customer,
+        orderReference: transactionReference,
+      });
+      if (tradeprintFulfillment?.success) {
+        try {
+          await Order.updateOne(
+            { paymentId },
+            {
+              $set: {
+                "checkoutContext.tradeprint": {
+                  orderReference: tradeprintFulfillment.orderReference,
+                  status: tradeprintFulfillment.tradeprintOrder?.status || "Processing",
+                  result: tradeprintFulfillment.result,
+                },
+              },
+            },
+          );
+        } catch (tradeprintPersistErr) {
+          console.error(
+            "[worldpay/charge] Failed to persist Tradeprint order metadata",
+            tradeprintPersistErr,
+          );
+        }
+      } else if (tradeprintFulfillment && !tradeprintFulfillment.skipped) {
+        console.error(
+          "[worldpay/charge] Tradeprint fulfillment failed after payment",
+          {
+            stage: tradeprintFulfillment.stage,
+            errorMessage: tradeprintFulfillment.errorMessage,
+            errorDetails: tradeprintFulfillment.errorDetails,
+          },
+        );
+      }
+    } catch (tradeprintErr) {
+      console.error("[worldpay/charge] Tradeprint fulfillment error", tradeprintErr);
+      tradeprintFulfillment = {
+        success: false,
+        stage: "error",
+        errorMessage: tradeprintErr.message || "Tradeprint fulfillment failed",
+      };
+    }
+
     res.json({
       success: true,
       provider: "worldpay",
@@ -949,6 +1007,7 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
       worldpay: data,
       receiptEmailSent,
       receiptEmailReason,
+      tradeprint: tradeprintFulfillment,
     });
   } catch (error) {
     res.status(500).json({

@@ -12,6 +12,8 @@ import {
   validateThirdPartyOrder,
   placeThirdPartyOrder,
 } from "../services/thirdPartyAuth.service.js";
+import { fulfillTradeprintCheckoutOrder } from "../services/tradeprintCheckoutFulfillment.js";
+import { optionalAuth } from "../middleware/optionalAuth.js";
 
 const router = express.Router();
 const THIRD_PARTY_PRICE_MARKUP_RATE = 0.1;
@@ -324,14 +326,50 @@ router.post("/products/quantities", async (req, res) => {
 
 // @route   POST /api/third-party/validate/orders
 // @desc    Validate an order payload with the third-party API before sending
-// @access  Private
-router.post("/validate/orders", protect, async (req, res) => {
+// @access  Public (checkout pre-validation proxy)
+router.post("/validate/orders", optionalAuth, async (req, res) => {
   try {
     const forceRefresh =
       String(req.query.forceRefresh || "").toLowerCase() === "true";
     const data = await validateThirdPartyOrder(req.body, { forceRefresh });
 
     res.json(data);
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route   POST /api/third-party/orders/checkout
+// @desc    Validate then place a Tradeprint order (used for checkout fulfilment)
+// @access  Public (server-side checkout; guests allowed)
+router.post("/orders/checkout", optionalAuth, async (req, res) => {
+  try {
+    const { lineItems, customerInfo, orderReference } = req.body || {};
+    const data = await fulfillTradeprintCheckoutOrder({
+      lineItems,
+      customerInfo,
+      orderReference,
+    });
+
+    if (data.skipped) {
+      return res.json({ success: true, skipped: true, reason: data.reason });
+    }
+
+    if (!data.success) {
+      return res.status(422).json({
+        success: false,
+        stage: data.stage,
+        errorMessage: data.errorMessage,
+        errorDetails: data.errorDetails || [],
+      });
+    }
+
+    res.json({
+      success: true,
+      result: data.result,
+      orderReference: data.orderReference,
+      tradeprintOrder: data.tradeprintOrder,
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
