@@ -3,6 +3,7 @@ import Order from '../models/Order.js';
 import { protect } from '../middleware/auth.js';
 import { findCheckoutOrderByTrackingId } from '../services/checkoutOrdersStore.js';
 import { buildShopOrderDetailFromPayload } from '../services/orderDetailSnapshot.js';
+import { enrichTrackResponseWithTradeprint } from '../services/tradeprintOrderTracking.js';
 
 const router = express.Router();
 
@@ -82,14 +83,27 @@ router.get('/track/:trackingNumber', async (req, res) => {
       .populate('items.product', 'name productImage images');
 
     if (order) {
-      // Return safe subset for public tracking
-      return res.json({
+      const checkoutRow = await findCheckoutOrderByTrackingId(order.trackingNumber);
+      const lineItems =
+        checkoutRow?.lineItems ||
+        order.checkoutContext?.lineItems ||
+        order.orderDetail?.lineItems ||
+        [];
+      const orderReference =
+        checkoutRow?.tradeprint?.orderReference ||
+        order.checkoutContext?.tradeprint?.orderReference ||
+        checkoutRow?.orderReference ||
+        order.checkoutContext?.orderReference ||
+        null;
+
+      const baseResponse = {
         trackingNumber: order.trackingNumber,
         status: order.status,
         createdAt: order.createdAt,
         updatedAt: order.updatedAt,
         total: order.total,
         currency: 'GBP',
+        orderReference,
         items: (order.items || []).map((it) => ({
           productName: it.product?.name || 'Product',
           quantity: it.quantity,
@@ -100,7 +114,14 @@ router.get('/track/:trackingNumber', async (req, res) => {
           city: order.shippingAddress.city,
           country: order.shippingAddress.country,
         } : null,
-      });
+      };
+
+      return res.json(
+        await enrichTrackResponseWithTradeprint(baseResponse, {
+          lineItems,
+          orderReference,
+        }),
+      );
     }
 
     const checkoutRow = await findCheckoutOrderByTrackingId(normalized);
@@ -119,7 +140,11 @@ router.get('/track/:trackingNumber', async (req, res) => {
       imageUrl: null,
     }));
 
-    return res.json({
+    const lineItems = Array.isArray(checkoutRow.lineItems) ? checkoutRow.lineItems : [];
+    const orderReference =
+      checkoutRow.tradeprint?.orderReference || checkoutRow.orderReference || null;
+
+    const baseResponse = {
       trackingNumber: checkoutRow.trackingId,
       status: checkoutRow.adminStatus || 'waiting',
       createdAt: checkoutRow.createdAt,
@@ -127,14 +152,21 @@ router.get('/track/:trackingNumber', async (req, res) => {
       total: Number(checkoutRow.amount || 0),
       currency: checkoutRow.currency || 'GBP',
       orderTitle: checkoutRow.orderDetails?.title || 'Checkout order',
-      orderReference: checkoutRow.orderReference,
+      orderReference,
       paymentId: checkoutRow.paymentId,
       items: itemsFromSummary,
       shippingAddress: {
         city: checkoutRow.customer?.city || '',
         country: 'GB',
       },
-    });
+    };
+
+    return res.json(
+      await enrichTrackResponseWithTradeprint(baseResponse, {
+        lineItems,
+        orderReference,
+      }),
+    );
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

@@ -138,3 +138,44 @@ export async function findCheckoutOrderByTrackingId(trackingId) {
   const found = rows.find((row) => String(row?.trackingId || '').trim().toUpperCase() === needle);
   return found || null;
 }
+
+export async function findCheckoutOrderByOrderReference(orderReference) {
+  const needle = String(orderReference || '').trim().toUpperCase();
+  if (!needle) return null;
+  const rows = await listCheckoutOrders();
+  const found = rows.find(
+    (row) => String(row?.orderReference || '').trim().toUpperCase() === needle,
+  );
+  return found || null;
+}
+
+export async function updateCheckoutOrderTradeprint(orderReference, tradeprint = {}) {
+  const needle = String(orderReference || '').trim().toUpperCase();
+  if (!needle) return null;
+
+  await ensureFile();
+  const raw = await readFile(ORDERS_FILE, 'utf8');
+  let list = [];
+  try {
+    list = JSON.parse(raw);
+    if (!Array.isArray(list)) list = [];
+  } catch {
+    list = [];
+  }
+
+  const idx = list.findIndex(
+    (row) => String(row?.orderReference || '').trim().toUpperCase() === needle,
+  );
+  if (idx === -1) return null;
+
+  const now = new Date().toISOString();
+  list[idx].tradeprint = {
+    ...(list[idx].tradeprint && typeof list[idx].tradeprint === 'object'
+      ? list[idx].tradeprint
+      : {}),
+    ...tradeprint,
+    updatedAt: now,
+  };
+  await writeFile(ORDERS_FILE, JSON.stringify(list, null, 2), 'utf8');
+  return list[idx];
+}

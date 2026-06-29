@@ -12,6 +12,8 @@ import {
   validateThirdPartyOrder,
   placeThirdPartyOrder,
 } from "../services/thirdPartyAuth.service.js";
+import Order from "../models/Order.js";
+import { updateCheckoutOrderTradeprint } from "../services/checkoutOrdersStore.js";
 import { fulfillTradeprintCheckoutOrder } from "../services/tradeprintCheckoutFulfillment.js";
 import {
   buildTradeprintOrderPayload,
@@ -385,6 +387,34 @@ router.post("/orders/checkout", optionalAuth, async (req, res) => {
         errorDetails: data.errorDetails || [],
         payload: data.payload || null,
       });
+    }
+
+    const tradeprintRef = data.orderReference || orderReference;
+    const tradeprintSnapshot = {
+      orderReference: tradeprintRef,
+      status: data.tradeprintOrder?.status || "Placed",
+      orderNumber: data.tradeprintOrder?.tpOrderDetails?.orderNumber || null,
+      placedAt: new Date().toISOString(),
+    };
+
+    try {
+      await updateCheckoutOrderTradeprint(orderReference, tradeprintSnapshot);
+    } catch (persistErr) {
+      console.warn("[tradeprint/checkout] Failed to persist checkout tradeprint ref", persistErr);
+    }
+
+    try {
+      await Order.updateMany(
+        { "checkoutContext.orderReference": orderReference },
+        {
+          $set: {
+            "checkoutContext.tradeprint": tradeprintSnapshot,
+            "checkoutContext.orderReference": orderReference,
+          },
+        },
+      );
+    } catch (mongoErr) {
+      console.warn("[tradeprint/checkout] Failed to persist Mongo tradeprint ref", mongoErr);
     }
 
     res.json({

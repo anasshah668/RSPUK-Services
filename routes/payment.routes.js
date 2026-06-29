@@ -822,6 +822,7 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
         orderDetail,
         checkoutContext: {
           source: "worldpay-checkout",
+          orderReference: transactionReference,
           lineItems,
           orderDetails:
             orderDetails && typeof orderDetails === "object" ? orderDetails : {},

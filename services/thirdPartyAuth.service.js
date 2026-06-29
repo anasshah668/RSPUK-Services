@@ -534,3 +534,59 @@ export const placeThirdPartyOrder = async (
     }),
   };
 };
+
+export const fetchThirdPartyOrderByReference = async (
+  orderReferenceV2,
+  { forceRefresh = false } = {},
+) => {
+  const ref = String(orderReferenceV2 || "").trim();
+  if (!ref) {
+    throw new Error("Order reference is required");
+  }
+
+  const { baseUrl } = getAuthConfig();
+  let token = await getThirdPartyToken({ forceRefresh });
+  const endpoint = `${baseUrl}/v2/orders/${encodeURIComponent(ref)}`;
+
+  const callApi = async (authToken) => {
+    const response = await fetch(endpoint, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    return { response, payload };
+  };
+
+  let { response, payload } = await callApi(token);
+
+  if (response.status === 401) {
+    token = await getThirdPartyToken({ forceRefresh: true });
+    ({ response, payload } = await callApi(token));
+  }
+
+  if (response.status === 404 || payload?.success === false) {
+    return {
+      success: false,
+      errorMessage:
+        payload?.errorMessage || payload?.message || "Order not found",
+      errorDetails: Array.isArray(payload?.errorDetails)
+        ? payload.errorDetails
+        : [],
+    };
+  }
+
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.error ||
+      `Failed to fetch order (${response.status})`;
+    throw new Error(message);
+  }
+
+  return {
+    success: payload?.success === true,
+    result: payload?.result || {},
+  };
+};
