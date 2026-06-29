@@ -487,6 +487,13 @@ export const placeThirdPartyOrder = async (
   let token = await getThirdPartyToken({ forceRefresh });
   const endpoint = `${baseUrl}/v2/orders/`;
 
+  console.log("[tradeprint/orders] POST payload", {
+    endpoint,
+    orderReference: orderPayload.orderReference,
+    orderItemsCount: orderPayload.orderItems?.length,
+    payload: orderPayload,
+  });
+
   const callApi = async (authToken) => {
     const response = await fetch(endpoint, {
       method: "POST",

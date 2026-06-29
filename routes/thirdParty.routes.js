@@ -13,6 +13,10 @@ import {
   placeThirdPartyOrder,
 } from "../services/thirdPartyAuth.service.js";
 import { fulfillTradeprintCheckoutOrder } from "../services/tradeprintCheckoutFulfillment.js";
+import {
+  buildTradeprintOrderPayload,
+  filterThirdPartyLines,
+} from "../services/tradeprintOrderPayload.js";
 import { optionalAuth } from "../middleware/optionalAuth.js";
 
 const router = express.Router();
@@ -331,9 +335,27 @@ router.post("/validate/orders", optionalAuth, async (req, res) => {
   try {
     const forceRefresh =
       String(req.query.forceRefresh || "").toLowerCase() === "true";
-    const data = await validateThirdPartyOrder(req.body, { forceRefresh });
+    const { lineItems, customerInfo, orderReference } = req.body || {};
 
-    res.json(data);
+    let orderPayload = req.body;
+    if (Array.isArray(lineItems)) {
+      const lines = filterThirdPartyLines(lineItems);
+      if (lines.length === 0) {
+        return res.json({ success: true, skipped: true, reason: "no_third_party_lines" });
+      }
+      orderPayload = buildTradeprintOrderPayload({
+        lines,
+        customerInfo: customerInfo || {},
+        orderReference,
+      });
+    }
+
+    const data = await validateThirdPartyOrder(orderPayload, { forceRefresh });
+
+    res.json({
+      ...data,
+      payload: orderPayload,
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -361,6 +383,7 @@ router.post("/orders/checkout", optionalAuth, async (req, res) => {
         stage: data.stage,
         errorMessage: data.errorMessage,
         errorDetails: data.errorDetails || [],
+        payload: data.payload || null,
       });
     }
 
@@ -369,6 +392,7 @@ router.post("/orders/checkout", optionalAuth, async (req, res) => {
       result: data.result,
       orderReference: data.orderReference,
       tradeprintOrder: data.tradeprintOrder,
+      payload: data.payload,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
