@@ -7,6 +7,85 @@ import { enrichTrackResponseWithTradeprint } from '../services/tradeprintOrderTr
 
 const router = express.Router();
 
+function getCheckoutLineItems(order) {
+  const ctx = order?.checkoutContext && typeof order.checkoutContext === 'object'
+    ? order.checkoutContext
+    : {};
+  const detail = order?.orderDetail && typeof order.orderDetail === 'object'
+    ? order.orderDetail
+    : {};
+  return (
+    (Array.isArray(ctx.lineItems) && ctx.lineItems.length ? ctx.lineItems : null) ||
+    (Array.isArray(detail.lines) && detail.lines.length ? detail.lines : null) ||
+    []
+  );
+}
+
+function buildTrackItemsFromOrder(order) {
+  if (Array.isArray(order.items) && order.items.length > 0) {
+    return order.items.map((it) => ({
+      productName: it.product?.name || 'Product',
+      quantity: it.quantity,
+      price: it.price,
+      imageUrl: it.product?.productImage?.url || it.product?.images?.[0]?.url || null,
+    }));
+  }
+
+  const lines = getCheckoutLineItems(order);
+  if (lines.length > 0) {
+    return lines.map((line, idx) => ({
+      productName: String(line?.title || line?.name || `Item ${idx + 1}`),
+      quantity: line?.quantity || 1,
+      price: line?.price ?? null,
+      imageUrl: line?.image || null,
+      note: String(line?.source || '').trim() === 'third-party' ? 'Tradeprint fulfilment' : undefined,
+    }));
+  }
+
+  const summary =
+    order?.orderDetail?.orderSummary?.summary ||
+    order?.checkoutContext?.orderDetails?.summary ||
+    [];
+  return (Array.isArray(summary) ? summary : []).map((row, idx) => ({
+    productName: String(row?.label || `Item ${idx + 1}`),
+    quantity: 1,
+    price: null,
+    note: String(row?.value || ''),
+    imageUrl: null,
+  }));
+}
+
+function buildMongoTrackResponse(order) {
+  const ctx = order?.checkoutContext && typeof order.checkoutContext === 'object'
+    ? order.checkoutContext
+    : {};
+  const orderReference =
+    ctx.tradeprint?.orderReference ||
+    ctx.orderReference ||
+    null;
+  const orderTitle =
+    order?.orderDetail?.orderSummary?.title ||
+    ctx.orderDetails?.title ||
+    'Checkout order';
+
+  return {
+    trackingNumber: order.trackingNumber,
+    status: order.status,
+    createdAt: order.createdAt,
+    updatedAt: order.updatedAt,
+    total: order.total,
+    currency: 'GBP',
+    orderReference,
+    orderTitle,
+    paymentId: order.paymentId || null,
+    items: buildTrackItemsFromOrder(order),
+    shippingAddress: order.shippingAddress ? {
+      city: order.shippingAddress.city,
+      country: order.shippingAddress.country,
+    } : null,
+  };
+}
+
 // @route   POST /api/orders
 // @desc    Create new order
 // @access  Private
@@ -83,48 +162,26 @@ router.get('/track/:trackingNumber', async (req, res) => {
       .populate('items.product', 'name productImage images');
 
     if (order) {
-      const checkoutRow = await findCheckoutOrderByTrackingId(order.trackingNumber);
-      const lineItems =
-        checkoutRow?.lineItems ||
-        order.checkoutContext?.lineItems ||
-        order.orderDetail?.lineItems ||
-        [];
+      const lineItems = getCheckoutLineItems(order);
       const orderReference =
-        checkoutRow?.tradeprint?.orderReference ||
         order.checkoutContext?.tradeprint?.orderReference ||
-        checkoutRow?.orderReference ||
         order.checkoutContext?.orderReference ||
         null;
 
-      const baseResponse = {
-        trackingNumber: order.trackingNumber,
-        status: order.status,
-        createdAt: order.createdAt,
-        updatedAt: order.updatedAt,
-        total: order.total,
-        currency: 'GBP',
-        orderReference,
-        items: (order.items || []).map((it) => ({
-          productName: it.product?.name || 'Product',
-          quantity: it.quantity,
-          price: it.price,
-          imageUrl: it.product?.productImage?.url || it.product?.images?.[0]?.url || null,
-        })),
-        shippingAddress: order.shippingAddress ? {
-          city: order.shippingAddress.city,
-          country: order.shippingAddress.country,
-        } : null,
-      };
-
       return res.json(
-        await enrichTrackResponseWithTradeprint(baseResponse, {
+        await enrichTrackResponseWithTradeprint(buildMongoTrackResponse(order), {
           lineItems,
           orderReference,
         }),
       );
     }
 
-    const checkoutRow = await findCheckoutOrderByTrackingId(normalized);
+    let checkoutRow = null;
+    try {
+      checkoutRow = await findCheckoutOrderByTrackingId(normalized);
+    } catch (fileErr) {
+      console.warn('[orders/track] checkout JSON lookup failed', fileErr?.message || fileErr);
+    }
     if (!checkoutRow) {
       return res.status(404).json({ message: 'Tracking number not found' });
     }

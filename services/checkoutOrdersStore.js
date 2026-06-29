@@ -8,7 +8,11 @@ const DATA_DIR = path.join(__dirname, '..', 'data');
 const ORDERS_FILE = path.join(DATA_DIR, 'checkout-orders.json');
 const TRACK_PREFIX = 'RSP';
 
+const isServerlessReadOnlyFs = () =>
+  process.env.VERCEL === '1' || Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
+
 const ensureFile = async () => {
+  if (isServerlessReadOnlyFs()) return;
   await mkdir(DATA_DIR, { recursive: true });
   try {
     await readFile(ORDERS_FILE, 'utf8');
@@ -17,20 +21,25 @@ const ensureFile = async () => {
   }
 };
 
+async function readCheckoutOrdersList() {
+  try {
+    const raw = await readFile(ORDERS_FILE, 'utf8');
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Append a paid Worldpay checkout order for admin listing.
  * @param {Record<string, unknown>} order
  */
 export async function recordCheckoutOrder(order) {
-  await ensureFile();
-  const raw = await readFile(ORDERS_FILE, 'utf8');
-  let list = [];
-  try {
-    list = JSON.parse(raw);
-    if (!Array.isArray(list)) list = [];
-  } catch {
-    list = [];
-  }
+  const list = isServerlessReadOnlyFs() ? [] : await (async () => {
+    await ensureFile();
+    return readCheckoutOrdersList();
+  })();
   const now = new Date().toISOString();
   const trackingId =
     String(order?.trackingId || '').trim() || createUniqueTrackingId(list);
@@ -42,20 +51,19 @@ export async function recordCheckoutOrder(order) {
     trackingId,
     ...order,
   };
-  list.unshift(row);
-  await writeFile(ORDERS_FILE, JSON.stringify(list, null, 2), 'utf8');
+  if (!isServerlessReadOnlyFs()) {
+    list.unshift(row);
+    await writeFile(ORDERS_FILE, JSON.stringify(list, null, 2), 'utf8');
+  }
   return row;
 }
 
 export async function listCheckoutOrders() {
-  await ensureFile();
-  const raw = await readFile(ORDERS_FILE, 'utf8');
-  try {
-    const list = JSON.parse(raw);
-    return Array.isArray(list) ? list : [];
-  } catch {
-    return [];
+  if (isServerlessReadOnlyFs()) {
+    return readCheckoutOrdersList();
   }
+  await ensureFile();
+  return readCheckoutOrdersList();
 }
 
 const ADMIN_STATUSES = new Set([
@@ -114,15 +122,9 @@ export async function updateCheckoutOrderStatus(orderId, status) {
   if (!ADMIN_STATUSES.has(normalized)) {
     throw new Error('Invalid status');
   }
+  if (isServerlessReadOnlyFs()) return null;
   await ensureFile();
-  const raw = await readFile(ORDERS_FILE, 'utf8');
-  let list = [];
-  try {
-    list = JSON.parse(raw);
-    if (!Array.isArray(list)) list = [];
-  } catch {
-    list = [];
-  }
+  const list = await readCheckoutOrdersList();
   const idx = list.findIndex((o) => o && o.id === orderId);
   if (idx === -1) return null;
   list[idx].adminStatus = normalized;
@@ -152,17 +154,10 @@ export async function findCheckoutOrderByOrderReference(orderReference) {
 export async function updateCheckoutOrderTradeprint(orderReference, tradeprint = {}) {
   const needle = String(orderReference || '').trim().toUpperCase();
   if (!needle) return null;
+  if (isServerlessReadOnlyFs()) return null;
 
   await ensureFile();
-  const raw = await readFile(ORDERS_FILE, 'utf8');
-  let list = [];
-  try {
-    list = JSON.parse(raw);
-    if (!Array.isArray(list)) list = [];
-  } catch {
-    list = [];
-  }
-
+  const list = await readCheckoutOrdersList();
   const idx = list.findIndex(
     (row) => String(row?.orderReference || '').trim().toUpperCase() === needle,
   );
