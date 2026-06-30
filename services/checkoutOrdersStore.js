@@ -114,6 +114,7 @@ export function normalizeCheckoutRowForAdmin(row) {
     paymentId: row.paymentId,
     worldpay: row.worldpay,
     source: row.source,
+    tradeprint: row.tradeprint,
   };
 }
 

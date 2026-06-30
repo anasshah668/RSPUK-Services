@@ -3,6 +3,7 @@ import { body, validationResult } from "express-validator";
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import sgMail from "@sendgrid/mail";
+import crypto from "crypto";
 import User from "../models/User.js";
 import SignupOtp from "../models/SignupOtp.js";
 import { protect } from "../middleware/auth.js";
@@ -63,6 +64,63 @@ const sendSignupOtpEmail = async ({ email, otp, name }) => {
     subject,
     html,
   });
+};
+
+const sendPasswordResetEmail = async ({ email, name, resetToken, context }) => {
+  const sendGridApiKey = process.env.SENDGRID_API_KEY;
+  const senderEmail = process.env.SENDGRID_FROM_EMAIL || process.env.MAIL_FROM;
+  const isAdmin = context === "admin";
+  const resetPath = isAdmin ? "/admin/reset-password" : "/reset-password";
+  const resetUrl = `${frontendUrl.replace(/\/+$/, "")}${resetPath}?token=${encodeURIComponent(resetToken)}`;
+  const subject = isAdmin
+    ? "Reset your admin password — River Sign & Printing"
+    : "Reset your password — River Sign & Printing";
+  const logoUrl = `${frontendUrl.replace(/\/+$/, "")}/logo.png`;
+  const html = `
+    <div style="background:#f4f6fb;padding:24px 0;font-family:Arial,sans-serif;color:#111827">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">
+        <tr>
+          <td style="background:linear-gradient(90deg,#1d4ed8,#2563eb);padding:18px 24px;color:#ffffff">
+            <img src="${logoUrl}" alt="River Sign & Printing" style="height:44px;max-width:180px;object-fit:contain;display:block;margin-bottom:10px" />
+            <h2 style="margin:0;font-size:20px;font-weight:700">River Sign &amp; Printing</h2>
+            <p style="margin:6px 0 0;font-size:13px;opacity:0.95">${isAdmin ? "Admin password reset" : "Password reset"}</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px">
+            <p style="margin:0 0 12px;font-size:15px">Hello ${name || "there"},</p>
+            <p style="margin:0 0 12px;font-size:15px;line-height:1.7">
+              We received a request to reset your ${isAdmin ? "admin " : ""}password. Click the button below to choose a new password.
+            </p>
+            <p style="margin:20px 0;text-align:center">
+              <a href="${resetUrl}" style="display:inline-block;padding:12px 22px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700">Reset password</a>
+            </p>
+            <p style="margin:0 0 10px;font-size:13px;color:#374151;line-height:1.6">
+              Or copy this link into your browser:<br />
+              <a href="${resetUrl}" style="color:#2563eb;word-break:break-all">${resetUrl}</a>
+            </p>
+            <p style="margin:16px 0 0;font-size:12px;color:#6b7280">
+              This link expires in <strong>1 hour</strong>. If you did not request a reset, you can ignore this email.
+            </p>
+          </td>
+        </tr>
+      </table>
+    </div>
+  `;
+
+  if (!sendGridApiKey || !senderEmail) {
+    console.log(`[Password reset] ${email} -> ${resetUrl}`);
+    return { sent: false, devResetUrl: resetUrl };
+  }
+
+  sgMail.setApiKey(sendGridApiKey);
+  await sgMail.send({
+    to: email,
+    from: senderEmail,
+    subject,
+    html,
+  });
+  return { sent: true };
 };
 
 // Configure Google strategy once.
@@ -351,11 +409,14 @@ router.get("/me", protect, async (req, res) => {
 });
 
 // @route   POST /api/auth/forgot-password
-// @desc    Request password reset (placeholder implementation)
+// @desc    Request password reset email
 // @access  Public
 router.post(
   "/forgot-password",
-  [body("email").isEmail().withMessage("Please provide a valid email")],
+  [
+    body("email").isEmail().withMessage("Please provide a valid email"),
+    body("context").optional().isIn(["admin", "user"]),
+  ],
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -363,20 +424,89 @@ router.post(
         return res.status(400).json({ errors: errors.array() });
       }
 
-      const { email } = req.body;
+      const email = String(req.body.email || "").trim().toLowerCase();
+      const context = req.body.context === "admin" ? "admin" : "user";
+      const genericMessage =
+        "If an account with that email exists, a password reset link has been sent.";
 
-      // In a real app, generate a token, store it, and send email.
       const user = await User.findOne({ email });
-
-      if (user) {
-        console.log(`Password reset requested for: ${email}`);
+      if (!user) {
+        return res.json({ message: genericMessage });
       }
 
-      // Always respond success to avoid leaking which emails exist
-      res.json({
-        message:
-          "If an account with that email exists, a password reset link has been sent.",
-      });
+      const isAdminRequest = context === "admin";
+      if (isAdminRequest && user.role !== "admin") {
+        return res.json({ message: genericMessage });
+      }
+
+      const resetToken = user.createPasswordResetToken();
+      await user.save({ validateBeforeSave: false });
+
+      try {
+        await sendPasswordResetEmail({
+          email: user.email,
+          name: user.name,
+          resetToken,
+          context,
+        });
+      } catch (mailErr) {
+        console.error("[forgot-password] Email failed", mailErr);
+        user.passwordResetToken = undefined;
+        user.passwordResetExpires = undefined;
+        await user.save({ validateBeforeSave: false });
+        return res.status(500).json({
+          message: "Could not send reset email. Please try again later.",
+        });
+      }
+
+      res.json({ message: genericMessage });
+    } catch (error) {
+      res.status(500).json({ message: error.message });
+    }
+  },
+);
+
+// @route   POST /api/auth/reset-password
+// @desc    Reset password using email token
+// @access  Public
+router.post(
+  "/reset-password",
+  [
+    body("token").notEmpty().withMessage("Reset token is required"),
+    body("password")
+      .isLength({ min: 6 })
+      .withMessage("Password must be at least 6 characters"),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+
+      const { token, password } = req.body;
+      const hashedToken = crypto.createHash("sha256").update(String(token)).digest("hex");
+
+      const user = await User.findOne({
+        passwordResetToken: hashedToken,
+        passwordResetExpires: { $gt: Date.now() },
+      }).select("+passwordResetToken +passwordResetExpires +password");
+
+      if (!user) {
+        return res.status(400).json({
+          message: "Invalid or expired reset link. Please request a new one.",
+        });
+      }
+
+      user.password = password;
+      user.passwordResetToken = undefined;
+      user.passwordResetExpires = undefined;
+      if (!user.provider || user.provider === "google") {
+        user.provider = "local";
+      }
+      await user.save();
+
+      res.json({ message: "Password reset successfully. You can now sign in." });
     } catch (error) {
       res.status(500).json({ message: error.message });
     }

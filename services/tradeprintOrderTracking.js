@@ -22,6 +22,42 @@ export function orderHasThirdPartyLines(lineItems) {
   );
 }
 
+export function isThirdPartyAdminOrder(order) {
+  if (!order || typeof order !== "object") return false;
+  if (order.tradeprint && typeof order.tradeprint === "object") return true;
+  const ctx =
+    order.checkoutContext && typeof order.checkoutContext === "object"
+      ? order.checkoutContext
+      : null;
+  if (ctx?.tradeprint) return true;
+
+  const collections = [
+    order.lineItems,
+    ctx?.lineItems,
+    order.orderDetail?.lines,
+    order.orderItems,
+  ];
+  if (collections.some(orderHasThirdPartyLines)) return true;
+
+  if (Array.isArray(order.items)) {
+    return order.items.some((item) => {
+      const customization = item?.customization;
+      const product = item?.product;
+      if (
+        String(customization?.source || product?.source || "").trim() ===
+        "third-party"
+      ) {
+        return true;
+      }
+      return Boolean(
+        customization?.thirdPartyProductKey || product?.thirdPartyProductKey,
+      );
+    });
+  }
+
+  return false;
+}
+
 function mapTradeprintItem(item) {
   const extra = item?.extraData && typeof item.extraData === "object" ? item.extraData : {};
   const status = item?.status || null;

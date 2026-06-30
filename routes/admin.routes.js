@@ -19,6 +19,7 @@ import {
   normalizeCheckoutRowForAdmin,
   updateCheckoutOrderStatus,
 } from "../services/checkoutOrdersStore.js";
+import { isThirdPartyAdminOrder } from "../services/tradeprintOrderTracking.js";
 
 const router = express.Router();
 
@@ -356,28 +357,47 @@ router.put("/orders/:id/status", async (req, res) => {
     }
 
     if (/^[a-fA-F0-9]{24}$/.test(id)) {
-      const order = await Order.findById(id);
+      const order = await Order.findById(id)
+        .populate("items.product")
+        .lean();
       if (!order) {
         return res.status(404).json({ message: "Order not found" });
       }
 
+      if (isThirdPartyAdminOrder(order)) {
+        return res.status(400).json({
+          message:
+            "Third-party print orders use partner API status and cannot be updated manually",
+        });
+      }
+
+      const orderDoc = await Order.findById(id);
       const statusAliasesWrite = {
         waiting: "pending",
         inprocess: "processing",
         completed: "delivered",
       };
-      order.status =
+      orderDoc.status =
         statusAliasesWrite[String(newStatus || "").toLowerCase()] || newStatus;
       if (req.body.trackingNumber) {
-        order.trackingNumber = req.body.trackingNumber;
+        orderDoc.trackingNumber = req.body.trackingNumber;
       }
 
-      await order.save();
-      const populated = await Order.findById(order._id)
+      await orderDoc.save();
+      const populated = await Order.findById(orderDoc._id)
         .populate("user", "name email")
         .populate("items.product")
         .lean();
       return res.json({ ...populated, orderKind: "shop" });
+    }
+
+    const checkoutRows = await listCheckoutOrders();
+    const checkoutRow = checkoutRows.find((row) => row && row.id === id);
+    if (checkoutRow && isThirdPartyAdminOrder(normalizeCheckoutRowForAdmin(checkoutRow))) {
+      return res.status(400).json({
+        message:
+          "Third-party print orders use partner API status and cannot be updated manually",
+      });
     }
 
     const updatedRow = await updateCheckoutOrderStatus(id, newStatus);
