@@ -27,15 +27,26 @@ const isVercel = process.env.VERCEL === '1';
 
 app.set('trust proxy', 1);
 
-// Middleware - Allow CORS from anywhere
+const CORS_ALLOWED_HEADERS = [
+  'Content-Type',
+  'Authorization',
+  'X-Client-Id',
+  'X-Requested-With',
+  'X-Admin-Gate-Token',
+  'x-checkout-orders-token',
+];
+
+// Middleware - reflect request origin (required for credentials + custom headers)
 app.use(
   cors({
     origin: true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Id', 'X-Requested-With'],
-  })
+    allowedHeaders: CORS_ALLOWED_HEADERS,
+    optionsSuccessStatus: 204,
+  }),
 );
+app.options('*', cors({ origin: true, credentials: true, allowedHeaders: CORS_ALLOWED_HEADERS }));
 app.use(express.json({ limit: '32kb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(passport.initialize());
