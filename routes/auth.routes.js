@@ -8,6 +8,8 @@ import User from "../models/User.js";
 import SignupOtp from "../models/SignupOtp.js";
 import { protect } from "../middleware/auth.js";
 import { adminAuthRateLimit, adminAuthRateLimitIfAdminContext } from "../middleware/adminAuthRateLimit.js";
+import { requireAdminGate, requireAdminGateForAdminContext } from "../middleware/requireAdminGate.js";
+import { signAdminGateToken } from "../utils/adminGateToken.js";
 import {
   rejectDangerousAuthBody,
   loginValidators,
@@ -34,6 +36,13 @@ const respondAdminDenied = async (res) => {
   await authFailureDelay();
   return res.status(403).json({ message: "Access denied. Admin credentials required." });
 };
+
+function safeCompareSecret(provided, expected) {
+  const a = Buffer.from(String(provided ?? ""));
+  const b = Buffer.from(String(expected ?? ""));
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
 
 const performLocalLogin = async ({ email, password, requireAdmin = false }) => {
   const user = await User.findOne({ email }).select("+password");
@@ -419,12 +428,56 @@ router.post(
   },
 );
 
+// @route   POST /api/auth/admin/verify-gate
+// @desc    Verify admin page access code and issue short-lived gate token
+// @access  Public
+router.post(
+  "/admin/verify-gate",
+  adminAuthRateLimit,
+  rejectDangerousAuthBody,
+  [
+    body("code")
+      .isString()
+      .trim()
+      .isLength({ min: 4, max: 64 })
+      .matches(/^[a-zA-Z0-9_-]+$/)
+      .withMessage("Access code format is invalid"),
+  ],
+  handleValidation,
+  async (req, res) => {
+    try {
+      const expected = String(process.env.ADMIN_ACCESS_CODE || "").trim();
+      if (!expected) {
+        return res.status(503).json({
+          message: "Admin access gate is not configured on the server.",
+        });
+      }
+
+      const code = String(req.body.code || "").trim();
+      if (!safeCompareSecret(code, expected)) {
+        await authFailureDelay();
+        return res.status(401).json({ message: "Invalid access code" });
+      }
+
+      const gateToken = signAdminGateToken();
+      return res.json({
+        gateToken,
+        expiresIn: 30 * 60,
+        message: "Access granted",
+      });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  },
+);
+
 // @route   POST /api/auth/admin/login
 // @desc    Secure admin login (rate limited + strict validation)
-// @access  Public
+// @access  Public (requires gate token)
 router.post(
   "/admin/login",
   adminAuthRateLimit,
+  requireAdminGate,
   rejectDangerousAuthBody,
   loginValidators,
   handleValidation,
@@ -484,6 +537,7 @@ router.get("/me", protect, async (req, res) => {
 router.post(
   "/forgot-password",
   rejectDangerousAuthBody,
+  requireAdminGateForAdminContext,
   adminAuthRateLimitIfAdminContext,
   [
     body("email")
