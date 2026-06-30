@@ -25,6 +25,8 @@ import { requireDatabase } from './middleware/requireDatabase.js';
 const app = express();
 const isVercel = process.env.VERCEL === '1';
 
+app.set('trust proxy', 1);
+
 // Middleware - Allow CORS from anywhere
 app.use(
   cors({
@@ -34,7 +36,7 @@ app.use(
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Id', 'X-Requested-With'],
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: '32kb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(passport.initialize());
 

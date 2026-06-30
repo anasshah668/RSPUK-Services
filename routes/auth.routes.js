@@ -7,10 +7,57 @@ import crypto from "crypto";
 import User from "../models/User.js";
 import SignupOtp from "../models/SignupOtp.js";
 import { protect } from "../middleware/auth.js";
+import { adminAuthRateLimit, adminAuthRateLimitIfAdminContext } from "../middleware/adminAuthRateLimit.js";
+import {
+  rejectDangerousAuthBody,
+  loginValidators,
+  handleValidation,
+  attachSafeCredentials,
+} from "../middleware/validateAuthRequest.js";
+import { safeEmail } from "../utils/safeAuthInput.js";
 
 const router = express.Router();
 const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
 const SIGNUP_OTP_TTL_MS = 10 * 60 * 1000;
+
+const authFailureDelay = () =>
+  new Promise((resolve) => {
+    setTimeout(resolve, 250 + Math.floor(Math.random() * 200));
+  });
+
+const respondInvalidCredentials = async (res) => {
+  await authFailureDelay();
+  return res.status(401).json({ message: "Invalid credentials" });
+};
+
+const respondAdminDenied = async (res) => {
+  await authFailureDelay();
+  return res.status(403).json({ message: "Access denied. Admin credentials required." });
+};
+
+const performLocalLogin = async ({ email, password, requireAdmin = false }) => {
+  const user = await User.findOne({ email }).select("+password");
+  if (!user) return { ok: false, reason: "invalid" };
+  if (requireAdmin && user.role !== "admin") {
+    return { ok: false, reason: "not_admin" };
+  }
+  if (user.provider !== "local") {
+    return { ok: false, reason: "provider", provider: user.provider };
+  }
+  const isMatch = await user.matchPassword(password);
+  if (!isMatch) return { ok: false, reason: "invalid" };
+  return {
+    ok: true,
+    user,
+    payload: {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      token: user.generateToken(),
+    },
+  };
+};
 
 const generateOtpCode = () =>
   String(Math.floor(100000 + Math.random() * 900000));
@@ -346,42 +393,65 @@ router.post(
 // @access  Public
 router.post(
   "/login",
-  [
-    body("email").isEmail().withMessage("Please provide a valid email"),
-    body("password").notEmpty().withMessage("Password is required"),
-  ],
+  rejectDangerousAuthBody,
+  loginValidators,
+  handleValidation,
+  attachSafeCredentials,
   async (req, res) => {
     try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
+      const { email, password } = req.safeAuth;
+      const result = await performLocalLogin({ email, password });
+
+      if (!result.ok) {
+        if (result.reason === "provider") {
+          await authFailureDelay();
+          return res.status(401).json({
+            message: `Please sign in with ${result.provider}`,
+          });
+        }
+        return respondInvalidCredentials(res);
       }
 
-      const { email, password } = req.body;
+      res.json(result.payload);
+    } catch (error) {
+      res.status(500).json({ message: error.message });
+    }
+  },
+);
 
-      const user = await User.findOne({ email }).select("+password");
-      if (!user) {
-        return res.status(401).json({ message: "Invalid credentials" });
-      }
-
-      if (user.provider !== "local") {
-        return res
-          .status(401)
-          .json({ message: `Please sign in with ${user.provider}` });
-      }
-
-      const isMatch = await user.matchPassword(password);
-      if (!isMatch) {
-        return res.status(401).json({ message: "Invalid credentials" });
-      }
-
-      res.json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        token: user.generateToken(),
+// @route   POST /api/auth/admin/login
+// @desc    Secure admin login (rate limited + strict validation)
+// @access  Public
+router.post(
+  "/admin/login",
+  adminAuthRateLimit,
+  rejectDangerousAuthBody,
+  loginValidators,
+  handleValidation,
+  attachSafeCredentials,
+  async (req, res) => {
+    try {
+      const { email, password } = req.safeAuth;
+      const result = await performLocalLogin({
+        email,
+        password,
+        requireAdmin: true,
       });
+
+      if (!result.ok) {
+        if (result.reason === "not_admin") {
+          return respondAdminDenied(res);
+        }
+        if (result.reason === "provider") {
+          await authFailureDelay();
+          return res.status(401).json({
+            message: `Please sign in with ${result.provider}`,
+          });
+        }
+        return respondInvalidCredentials(res);
+      }
+
+      res.json(result.payload);
     } catch (error) {
       res.status(500).json({ message: error.message });
     }
@@ -413,21 +483,25 @@ router.get("/me", protect, async (req, res) => {
 // @access  Public
 router.post(
   "/forgot-password",
+  rejectDangerousAuthBody,
+  adminAuthRateLimitIfAdminContext,
   [
-    body("email").isEmail().withMessage("Please provide a valid email"),
+    body("email")
+      .custom((value) => safeEmail(value) != null)
+      .withMessage("Please provide a valid email"),
     body("context").optional().isIn(["admin", "user"]),
   ],
+  handleValidation,
   async (req, res) => {
     try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
-      }
-
-      const email = String(req.body.email || "").trim().toLowerCase();
+      const email = safeEmail(req.body.email);
       const context = req.body.context === "admin" ? "admin" : "user";
       const genericMessage =
         "If an account with that email exists, a password reset link has been sent.";
+
+      if (!email) {
+        return res.status(400).json({ message: "Please provide a valid email" });
+      }
 
       const user = await User.findOne({ email });
       if (!user) {
@@ -471,19 +545,23 @@ router.post(
 // @access  Public
 router.post(
   "/reset-password",
+  rejectDangerousAuthBody,
   [
-    body("token").notEmpty().withMessage("Reset token is required"),
+    body("token")
+      .isString()
+      .trim()
+      .isLength({ min: 32, max: 256 })
+      .withMessage("Reset token is invalid"),
     body("password")
-      .isLength({ min: 6 })
-      .withMessage("Password must be at least 6 characters"),
+      .custom((value) => {
+        if (typeof value !== "string") return false;
+        return value.length >= 6 && value.length <= 128;
+      })
+      .withMessage("Password must be between 6 and 128 characters"),
   ],
+  handleValidation,
   async (req, res) => {
     try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
-      }
-
       const { token, password } = req.body;
       const hashedToken = crypto.createHash("sha256").update(String(token)).digest("hex");
 
