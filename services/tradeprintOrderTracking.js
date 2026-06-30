@@ -1,4 +1,19 @@
-import { fetchThirdPartyOrderByReference } from "./thirdPartyAuth.service.js";
+import {
+  cancelThirdPartyOrderItem,
+  fetchThirdPartyOrderByReference,
+} from "./thirdPartyAuth.service.js";
+
+export const NON_CANCELLABLE_ITEM_STATUSES = new Set([
+  "PrintingInProgress",
+  "Shipped",
+  "Cancelled",
+]);
+
+export function isOrderItemCancellable(status) {
+  const value = String(status || "").trim();
+  if (!value) return true;
+  return !NON_CANCELLABLE_ITEM_STATUSES.has(value);
+}
 
 export function orderHasThirdPartyLines(lineItems) {
   return (
@@ -9,13 +24,16 @@ export function orderHasThirdPartyLines(lineItems) {
 
 function mapTradeprintItem(item) {
   const extra = item?.extraData && typeof item.extraData === "object" ? item.extraData : {};
+  const status = item?.status || null;
   return {
+    itemReference: item?.itemReference || null,
     description:
       extra.description ||
       extra.merchandisingProductName ||
       extra.referenceLabel ||
       "Print item",
-    status: item?.status || null,
+    status,
+    cancellable: isOrderItemCancellable(status),
     quantity: item?.quantity ?? null,
     serviceLevel: item?.serviceLevel || null,
     trackingNumber:
@@ -65,7 +83,7 @@ export async function enrichTrackResponseWithTradeprint(
     return {
       ...baseResponse,
       isTradeprintOrder: true,
-      tradeprintError: "Tradeprint order reference is not available yet",
+      tradeprintError: "Print partner reference is not available yet",
     };
   }
 
@@ -75,7 +93,7 @@ export async function enrichTrackResponseWithTradeprint(
       return {
         ...baseResponse,
         isTradeprintOrder: true,
-        tradeprintError: data.errorMessage || "Tradeprint order not found",
+        tradeprintError: data.errorMessage || "Print order not found",
       };
     }
 
@@ -99,7 +117,61 @@ export async function enrichTrackResponseWithTradeprint(
     return {
       ...baseResponse,
       isTradeprintOrder: true,
-      tradeprintError: error.message || "Failed to load Tradeprint tracking",
+      tradeprintError: error.message || "Failed to load print order status",
     };
   }
+}
+
+export async function cancelTradeprintOrderItem({
+  orderReference,
+  itemReference,
+  lineItems = [],
+} = {}) {
+  if (!orderHasThirdPartyLines(lineItems)) {
+    return {
+      success: false,
+      errorMessage: "This order does not include cancellable print items",
+    };
+  }
+
+  const orderRef = String(orderReference || "").trim();
+  const itemRef = String(itemReference || "").trim();
+  if (!orderRef || !itemRef) {
+    return {
+      success: false,
+      errorMessage: "Order reference and item reference are required",
+    };
+  }
+
+  const live = await fetchThirdPartyOrderByReference(orderRef);
+  if (!live.success) {
+    return {
+      success: false,
+      errorMessage: live.errorMessage || "Print order not found",
+      errorDetails: live.errorDetails || {},
+    };
+  }
+
+  const items = Array.isArray(live.result?.orderItems) ? live.result.orderItems : [];
+  const target = items.find(
+    (row) => String(row?.itemReference || "").trim() === itemRef,
+  );
+  if (!target) {
+    return {
+      success: false,
+      errorMessage: "Order item not found",
+      errorDetails: {},
+    };
+  }
+
+  if (!isOrderItemCancellable(target.status)) {
+    return {
+      success: false,
+      errorMessage:
+        "This item cannot be cancelled because it is already PrintingInProgress, Shipped, or Cancelled.",
+      errorDetails: {},
+    };
+  }
+
+  return cancelThirdPartyOrderItem(orderRef, itemRef);
 }

@@ -590,3 +590,62 @@ export const fetchThirdPartyOrderByReference = async (
     result: payload?.result || {},
   };
 };
+
+export const cancelThirdPartyOrderItem = async (
+  orderReferenceV2,
+  itemReferenceV2,
+  { forceRefresh = false } = {},
+) => {
+  const orderRef = String(orderReferenceV2 || "").trim();
+  const itemRef = String(itemReferenceV2 || "").trim();
+  if (!orderRef || !itemRef) {
+    throw new Error("Order reference and item reference are required");
+  }
+
+  const { baseUrl } = getAuthConfig();
+  let token = await getThirdPartyToken({ forceRefresh });
+  const endpoint = `${baseUrl}/v2/orders/${encodeURIComponent(orderRef)}/orderItems/${encodeURIComponent(itemRef)}`;
+
+  const callApi = async (authToken) => {
+    const response = await fetch(endpoint, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    return { response, payload };
+  };
+
+  let { response, payload } = await callApi(token);
+
+  if (response.status === 401) {
+    token = await getThirdPartyToken({ forceRefresh: true });
+    ({ response, payload } = await callApi(token));
+  }
+
+  if (payload?.success === false) {
+    return {
+      success: false,
+      errorMessage:
+        payload?.errorMessage || payload?.message || "Cancellation failed",
+      errorDetails:
+        payload?.errorDetails && typeof payload.errorDetails === "object"
+          ? payload.errorDetails
+          : {},
+    };
+  }
+
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.error ||
+      `Failed to cancel order item (${response.status})`;
+    throw new Error(message);
+  }
+
+  return {
+    success: payload?.success === true,
+    result: payload?.result || {},
+  };
+};

@@ -3,7 +3,7 @@ import Order from '../models/Order.js';
 import { protect } from '../middleware/auth.js';
 import { findCheckoutOrderByTrackingId } from '../services/checkoutOrdersStore.js';
 import { buildShopOrderDetailFromPayload } from '../services/orderDetailSnapshot.js';
-import { enrichTrackResponseWithTradeprint } from '../services/tradeprintOrderTracking.js';
+import { enrichTrackResponseWithTradeprint, cancelTradeprintOrderItem } from '../services/tradeprintOrderTracking.js';
 
 const router = express.Router();
 
@@ -38,7 +38,6 @@ function buildTrackItemsFromOrder(order) {
       quantity: line?.quantity || 1,
       price: line?.price ?? null,
       imageUrl: line?.image || null,
-      note: String(line?.source || '').trim() === 'third-party' ? 'Tradeprint fulfilment' : undefined,
     }));
   }
 
@@ -86,6 +85,41 @@ function buildMongoTrackResponse(order) {
   };
 }
 
+async function resolveTrackingContext(trackingNumber) {
+  const normalized = String(trackingNumber || '').trim().toUpperCase();
+  if (!normalized) return null;
+
+  const order = await Order.findOne({
+    trackingNumber: {
+      $regex: `^${String(trackingNumber).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+      $options: 'i',
+    },
+  });
+
+  if (order) {
+    return {
+      lineItems: getCheckoutLineItems(order),
+      orderReference:
+        order.checkoutContext?.tradeprint?.orderReference ||
+        order.checkoutContext?.orderReference ||
+        null,
+    };
+  }
+
+  try {
+    const checkoutRow = await findCheckoutOrderByTrackingId(normalized);
+    if (!checkoutRow) return null;
+    return {
+      lineItems: Array.isArray(checkoutRow.lineItems) ? checkoutRow.lineItems : [],
+      orderReference:
+        checkoutRow.tradeprint?.orderReference || checkoutRow.orderReference || null,
+    };
+  } catch (fileErr) {
+    console.warn('[orders] checkout JSON lookup failed', fileErr?.message || fileErr);
+    return null;
+  }
+}
+
 // @route   POST /api/orders
 // @desc    Create new order
 // @access  Private
@@ -122,6 +156,52 @@ router.get('/', protect, async (req, res) => {
     res.json(orders);
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+});
+
+// @route   POST /api/orders/cancel-item
+// @desc    Cancel a print partner order item before manufacturing
+// @access  Public (tracking ID verification)
+router.post('/cancel-item', async (req, res) => {
+  try {
+    const trackingNumber = String(req.body?.trackingNumber || '').trim();
+    const itemReference = String(req.body?.itemReference || '').trim();
+
+    if (!trackingNumber || !itemReference) {
+      return res.status(400).json({
+        success: false,
+        errorMessage: 'Tracking number and item reference are required',
+      });
+    }
+
+    const context = await resolveTrackingContext(trackingNumber);
+    if (!context) {
+      return res.status(404).json({
+        success: false,
+        errorMessage: 'Tracking number not found',
+      });
+    }
+
+    const data = await cancelTradeprintOrderItem({
+      orderReference: context.orderReference,
+      itemReference,
+      lineItems: context.lineItems,
+    });
+
+    if (!data.success) {
+      return res.status(422).json({
+        success: false,
+        errorMessage: data.errorMessage || 'Cancellation failed',
+        errorDetails: data.errorDetails || {},
+      });
+    }
+
+    return res.json({
+      success: true,
+      result: data.result,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, errorMessage: error.message });
   }
 });
 
