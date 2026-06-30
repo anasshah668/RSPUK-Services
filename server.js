@@ -19,7 +19,6 @@ import neonPricingRoutes from './routes/neonPricing.routes.js';
 import featuredSignagePricingRoutes from './routes/featuredSignagePricing.routes.js';
 import designServiceRoutes from './routes/designService.routes.js';
 import uploadsRoutes from './routes/uploads.routes.js';
-import googleReviewsRoutes from './routes/googleReviews.routes.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requireDatabase } from './middleware/requireDatabase.js';
 
@@ -88,8 +87,6 @@ app.get('/api/health', (req, res) => {
     },
   });
 });
-
-app.use('/api/google-reviews', googleReviewsRoutes);
 
 app.use(requireDatabase);
 
