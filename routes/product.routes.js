@@ -9,8 +9,10 @@ const router = express.Router();
 // @access  Public
 router.get('/', async (req, res) => {
   try {
-    const { category, page = 1, limit = 12 } = req.query;
-    const query = category ? { category, isActive: true } : { isActive: true };
+    const { category, source, page = 1, limit = 12 } = req.query;
+    const query = { isActive: true };
+    if (category) query.category = category;
+    if (source) query.source = source;
     
     const products = await Product.find(query)
       .limit(limit * 1)

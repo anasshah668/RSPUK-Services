@@ -99,8 +99,18 @@ router.post(
         basePrice: parseFloat(req.body.basePrice),
         isActive: req.body.isActive === "true" || req.body.isActive === true,
         images,
+        source: "local",
+        thirdPartyProductKey: null,
+        thirdPartyAttributes: {},
         createdBy: req.user._id,
       };
+
+      if (images.length > 0) {
+        productData.productImage = {
+          url: images[0].url,
+          publicId: images[0].publicId || "",
+        };
+      }
 
       // Optional JSON fields sent via multipart/form-data
       if (req.body.uiOptions) {
@@ -256,6 +266,21 @@ router.put(
         } catch (e) {
           console.warn("Invalid faqs JSON, ignoring:", e?.message);
         }
+      }
+
+      // Admin-managed catalogue products stay in-house; never inherit Tradeprint routing.
+      if (product.source !== "third-party") {
+        product.source = "local";
+        product.thirdPartyProductKey = null;
+        product.thirdPartyAttributes = {};
+      }
+
+      if (product.images?.length > 0) {
+        const primary = product.images[0];
+        product.productImage = {
+          url: primary.url || "",
+          publicId: primary.publicId || "",
+        };
       }
 
       await product.save();

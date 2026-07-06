@@ -1,6 +1,7 @@
 import express from 'express';
 import SiteSetting from '../models/SiteSetting.js';
 import GalleryProject from '../models/GalleryProject.js';
+import Faq from '../models/Faq.js';
 import { protect, admin } from '../middleware/auth.js';
 import { upload, uploadMultipleToCloudinary } from '../config/cloudinary.js';
 import {
@@ -21,6 +22,15 @@ const defaultAnnouncement = {
 const normalizeGalleryProjectPayload = (body = {}) => ({
   title: String(body.title || '').trim(),
   description: String(body.description || '').trim(),
+  isActive: body.isActive === undefined
+    ? true
+    : (body.isActive === true || body.isActive === 'true'),
+  displayOrder: Number.isFinite(Number(body.displayOrder)) ? Number(body.displayOrder) : 0,
+});
+
+const normalizeFaqPayload = (body = {}) => ({
+  question: String(body.question || '').trim(),
+  answer: String(body.answer || '').trim(),
   isActive: body.isActive === undefined
     ? true
     : (body.isActive === true || body.isActive === 'true'),
@@ -198,6 +208,86 @@ router.delete('/gallery-projects/:id', protect, admin, async (req, res) => {
     if (!project) return res.status(404).json({ message: 'Gallery project not found' });
     await project.deleteOne();
     res.json({ message: 'Gallery project deleted' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Public: list active FAQs
+router.get('/faqs', async (req, res) => {
+  try {
+    const faqs = await Faq.find({ isActive: true })
+      .sort({ displayOrder: 1, createdAt: -1 })
+      .lean();
+    res.json({ faqs });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Admin: list all FAQs
+router.get('/faqs/admin', protect, admin, async (req, res) => {
+  try {
+    const faqs = await Faq.find({})
+      .sort({ displayOrder: 1, createdAt: -1 })
+      .lean();
+    res.json({ faqs });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Admin: create FAQ
+router.post('/faqs', protect, admin, async (req, res) => {
+  try {
+    const payload = normalizeFaqPayload(req.body);
+    if (!payload.question) {
+      return res.status(400).json({ message: 'Question is required' });
+    }
+    if (!payload.answer) {
+      return res.status(400).json({ message: 'Answer is required' });
+    }
+
+    const faq = await Faq.create(payload);
+    res.status(201).json(faq);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Admin: update FAQ
+router.put('/faqs/:id', protect, admin, async (req, res) => {
+  try {
+    const faq = await Faq.findById(req.params.id);
+    if (!faq) return res.status(404).json({ message: 'FAQ not found' });
+
+    const payload = normalizeFaqPayload(req.body);
+    if (!payload.question) {
+      return res.status(400).json({ message: 'Question is required' });
+    }
+    if (!payload.answer) {
+      return res.status(400).json({ message: 'Answer is required' });
+    }
+
+    faq.question = payload.question;
+    faq.answer = payload.answer;
+    faq.isActive = payload.isActive;
+    faq.displayOrder = payload.displayOrder;
+    await faq.save();
+
+    res.json(faq);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Admin: delete FAQ
+router.delete('/faqs/:id', protect, admin, async (req, res) => {
+  try {
+    const faq = await Faq.findById(req.params.id);
+    if (!faq) return res.status(404).json({ message: 'FAQ not found' });
+    await faq.deleteOne();
+    res.json({ message: 'FAQ deleted' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
