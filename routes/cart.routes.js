@@ -154,18 +154,26 @@ router.post("/items", withCart, async (req, res) => {
     );
     const cart = req.cart;
     const pid = String(item.id);
+    const payload =
+      item && typeof item === "object" ? { ...item } : {};
+    delete payload.quantity;
+
+    // Design service is always a single line per request — replace payload, do not stack qty.
+    const isDesignService = payload.type === "design-service";
 
     const existing = cart.items.find((i) => String(i.payload?.id) === pid);
     if (existing) {
-      existing.quantity += qty;
+      if (isDesignService) {
+        existing.payload = payload;
+        existing.quantity = 1;
+      } else {
+        existing.quantity += qty;
+      }
     } else {
-      const payload =
-        item && typeof item === "object" ? { ...item } : {};
-      delete payload.quantity;
       cart.items.push({
         lineId: randomUUID(),
         payload,
-        quantity: qty,
+        quantity: isDesignService ? 1 : qty,
       });
     }
 

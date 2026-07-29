@@ -2,12 +2,34 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import DesignServiceRequest from '../models/DesignServiceRequest.js';
 import { protect, admin } from '../middleware/auth.js';
+import { optionalAuth } from '../middleware/optionalAuth.js';
 import { artworkUpload, uploadArtworkToCloudinary } from '../config/cloudinary.js';
 import { getDesignServicePrice } from '../services/designServicePrice.js';
 
 const router = express.Router();
 
 const trim = (value) => String(value ?? '').trim();
+
+const uploadReferenceFiles = async (files) => {
+  const referenceFiles = [];
+  if (!Array.isArray(files)) return referenceFiles;
+
+  for (const file of files) {
+    const uploaded = await uploadArtworkToCloudinary(
+      file.buffer,
+      file.originalname,
+      'printing-platform/design-service/references',
+    );
+    referenceFiles.push({
+      url: uploaded.url,
+      publicId: uploaded.publicId,
+      originalName: uploaded.originalFilename || file.originalname || '',
+      resourceType: uploaded.resourceType || 'image',
+    });
+  }
+
+  return referenceFiles;
+};
 
 router.get('/price', async (_req, res) => {
   try {
@@ -30,6 +52,63 @@ router.get('/my', protect, async (req, res) => {
     res.status(500).json({ message: error.message || 'Failed to load design requests' });
   }
 });
+
+/** Free professional-design inquiry — no payment. Visible to admin immediately. */
+router.post(
+  '/inquiry',
+  optionalAuth,
+  (req, res, next) => {
+    artworkUpload.array('referenceFiles', 5)(req, res, (err) => {
+      if (err) {
+        const status = err?.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+        return res.status(status).json({ message: err.message });
+      }
+      next();
+    });
+  },
+  [
+    body('title').trim().notEmpty().withMessage('Title is required'),
+    body('brief').trim().notEmpty().withMessage('Brief is required'),
+    body('customerName').trim().notEmpty().withMessage('Contact name is required'),
+    body('customerEmail').trim().isEmail().withMessage('A valid email is required'),
+    body('customerPhone').trim().notEmpty().withMessage('Phone is required'),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+
+      const customerEmail = trim(req.body.customerEmail).toLowerCase();
+      const referenceFiles = await uploadReferenceFiles(req.files);
+
+      const requestDoc = await DesignServiceRequest.create({
+        user: req.user?._id || null,
+        requestKind: 'inquiry',
+        title: trim(req.body.title),
+        brief: trim(req.body.brief),
+        productType: trim(req.body.productType),
+        referenceFiles,
+        priceAmount: 0,
+        currency: 'GBP',
+        vatInclusive: true,
+        customerName: trim(req.body.customerName),
+        customerEmail,
+        customerPhone: trim(req.body.customerPhone),
+        customerAddress: trim(req.body.customerAddress),
+        customerCity: trim(req.body.customerCity),
+        customerPostalCode: trim(req.body.customerPostalCode),
+        paymentStatus: 'not_required',
+        status: 'submitted',
+      });
+
+      res.status(201).json(requestDoc);
+    } catch (error) {
+      res.status(500).json({ message: error.message || 'Failed to submit design inquiry' });
+    }
+  },
+);
 
 router.post(
   '/',
@@ -56,23 +135,7 @@ router.post(
       }
 
       const pricing = await getDesignServicePrice();
-      const referenceFiles = [];
-
-      if (Array.isArray(req.files)) {
-        for (const file of req.files) {
-          const uploaded = await uploadArtworkToCloudinary(
-            file.buffer,
-            file.originalname,
-            'printing-platform/design-service/references',
-          );
-          referenceFiles.push({
-            url: uploaded.url,
-            publicId: uploaded.publicId,
-            originalName: uploaded.originalFilename || file.originalname || '',
-            resourceType: uploaded.resourceType || 'image',
-          });
-        }
-      }
+      const referenceFiles = await uploadReferenceFiles(req.files);
 
       const customerEmail = trim(req.body.customerEmail || req.user.email).toLowerCase();
       const accountEmail = trim(req.user.email).toLowerCase();
@@ -82,6 +145,7 @@ router.post(
 
       const requestDoc = await DesignServiceRequest.create({
         user: req.user._id,
+        requestKind: 'paid',
         title: trim(req.body.title),
         brief: trim(req.body.brief),
         productType: trim(req.body.productType),
@@ -108,8 +172,19 @@ router.post(
 
 router.get('/admin/all', protect, admin, async (req, res) => {
   try {
-    const { status } = req.query;
-    const query = { paymentStatus: 'paid' };
+    const { status, kind } = req.query;
+    const query = {
+      $or: [{ requestKind: 'inquiry' }, { paymentStatus: 'paid' }],
+    };
+
+    if (kind === 'inquiry') {
+      delete query.$or;
+      query.requestKind = 'inquiry';
+    } else if (kind === 'paid') {
+      delete query.$or;
+      query.paymentStatus = 'paid';
+    }
+
     if (status) query.status = status;
 
     const requests = await DesignServiceRequest.find(query)
@@ -126,7 +201,7 @@ router.get('/admin/all', protect, admin, async (req, res) => {
 router.patch('/admin/:id', protect, admin, async (req, res) => {
   try {
     const { status, adminNotes } = req.body || {};
-    const allowed = ['paid', 'in_progress', 'delivered', 'cancelled'];
+    const allowed = ['submitted', 'paid', 'in_progress', 'delivered', 'cancelled'];
     const update = {};
 
     if (status !== undefined) {

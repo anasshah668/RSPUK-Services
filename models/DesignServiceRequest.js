@@ -27,7 +27,14 @@ const designServiceRequestSchema = new mongoose.Schema(
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      required: false,
+      index: true,
+      default: null,
+    },
+    requestKind: {
+      type: String,
+      enum: ['paid', 'inquiry'],
+      default: 'paid',
       index: true,
     },
     title: {
@@ -49,6 +56,7 @@ const designServiceRequestSchema = new mongoose.Schema(
     priceAmount: {
       type: Number,
       required: true,
+      default: 0,
     },
     currency: {
       type: String,
@@ -60,7 +68,7 @@ const designServiceRequestSchema = new mongoose.Schema(
     },
     paymentStatus: {
       type: String,
-      enum: ['pending', 'paid', 'failed', 'refunded'],
+      enum: ['pending', 'paid', 'failed', 'refunded', 'not_required'],
       default: 'pending',
     },
     paymentId: { type: String, default: '' },
@@ -68,7 +76,7 @@ const designServiceRequestSchema = new mongoose.Schema(
     trackingId: { type: String, default: '' },
     status: {
       type: String,
-      enum: ['awaiting_payment', 'paid', 'in_progress', 'delivered', 'cancelled'],
+      enum: ['awaiting_payment', 'submitted', 'paid', 'in_progress', 'delivered', 'cancelled'],
       default: 'awaiting_payment',
     },
     deliverables: [deliverableSchema],

@@ -540,7 +540,13 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
     const lineItems = sanitizeLineItemsForPersistence(lineItemsRaw);
 
     const designServiceRequestId = trim(
-      orderDetails?.designServiceRequestId || "",
+      orderDetails?.designServiceRequestId ||
+        lineItems.find(
+          (item) =>
+            String(item?.type || "").toLowerCase() === "design-service" &&
+            item?.designServiceRequestId,
+        )?.designServiceRequestId ||
+        "",
     );
     const hasDesignServiceLine = lineItems.some(
       (item) => String(item?.type || "").toLowerCase() === "design-service",
@@ -581,7 +587,22 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
           message: "Design service request not found or already paid.",
         });
       }
-      if (!isValidDesignServiceChargeAmount(designServiceRequestDoc, amount)) {
+
+      const designServiceLines = lineItems.filter(
+        (item) => String(item?.type || "").toLowerCase() === "design-service",
+      );
+      const onlyDesignService =
+        lineItems.length > 0 && designServiceLines.length === lineItems.length;
+      const designLineAmount = designServiceLines.reduce((sum, item) => {
+        const qty = Math.max(1, Number(item?.quantity) || 1);
+        const price = Number(item?.price) || 0;
+        return sum + price * qty;
+      }, 0);
+      const amountToValidate = onlyDesignService || designServiceLines.length === 0
+        ? amount
+        : designLineAmount || amount;
+
+      if (!isValidDesignServiceChargeAmount(designServiceRequestDoc, amountToValidate)) {
         return res.status(400).json({
           message: `Invalid payment amount. Expected GBP ${Number(designServiceRequestDoc.priceAmount).toFixed(2)}.`,
         });
