@@ -12,6 +12,12 @@ import {
   getFeaturedSignagePricingAdmin,
   updateFeaturedSignagePricingAdmin,
 } from "../controllers/featuredSignagePricing.controller.js";
+import {
+  listFeaturedSignageMediaAdmin,
+  getFeaturedSignageMediaAdmin,
+  updateFeaturedSignageMediaAdmin,
+  deleteFeaturedSignageMediaAdmin,
+} from "../controllers/featuredSignageMedia.controller.js";
 import { protect, admin } from "../middleware/auth.js";
 import { upload, uploadMultipleToCloudinary } from "../config/cloudinary.js";
 import {
@@ -443,6 +449,16 @@ router.put("/neon-pricing", updateNeonPricingSettings);
 router.get("/featured-signage-pricing", listFeaturedSignagePricingAdmin);
 router.get("/featured-signage-pricing/:categorySlug", getFeaturedSignagePricingAdmin);
 router.put("/featured-signage-pricing/:categorySlug", updateFeaturedSignagePricingAdmin);
+
+router.get("/featured-signage-media", listFeaturedSignageMediaAdmin);
+router.get("/featured-signage-media/:categorySlug", getFeaturedSignageMediaAdmin);
+router.put("/featured-signage-media/:categorySlug", (req, res, next) => {
+  upload.array("images", 20)(req, res, (err) => {
+    if (err) return res.status(400).json({ message: err.message });
+    next();
+  });
+}, updateFeaturedSignageMediaAdmin);
+router.delete("/featured-signage-media/:categorySlug", deleteFeaturedSignageMediaAdmin);
 
 // ==================== ANALYTICS ====================
 
