@@ -22,7 +22,7 @@ import {
 import { optionalAuth } from "../middleware/optionalAuth.js";
 
 const router = express.Router();
-const THIRD_PARTY_PRICE_MARKUP_RATE = 0.1;
+const THIRD_PARTY_PRICE_MARKUP_RATE = 0.2;
 
 const applyThirdPartyPriceMarkup = (prices, markupRate = THIRD_PARTY_PRICE_MARKUP_RATE) => {
   if (!Array.isArray(prices)) return [];

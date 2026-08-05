@@ -112,7 +112,7 @@ router.post(
 
 router.post(
   '/',
-  protect,
+  optionalAuth,
   (req, res, next) => {
     artworkUpload.array('referenceFiles', 5)(req, res, (err) => {
       if (err) {
@@ -126,6 +126,7 @@ router.post(
     body('title').trim().notEmpty().withMessage('Title is required'),
     body('brief').trim().notEmpty().withMessage('Brief is required'),
     body('customerName').trim().notEmpty().withMessage('Contact name is required'),
+    body('customerEmail').trim().isEmail().withMessage('A valid email is required'),
   ],
   async (req, res) => {
     try {
@@ -137,14 +138,20 @@ router.post(
       const pricing = await getDesignServicePrice();
       const referenceFiles = await uploadReferenceFiles(req.files);
 
-      const customerEmail = trim(req.body.customerEmail || req.user.email).toLowerCase();
-      const accountEmail = trim(req.user.email).toLowerCase();
+      const customerEmail = trim(
+        req.body.customerEmail || req.user?.email || '',
+      ).toLowerCase();
+      if (!customerEmail) {
+        return res.status(400).json({ message: 'A valid email is required.' });
+      }
+
+      const accountEmail = trim(req.user?.email || '').toLowerCase();
       if (customerEmail && accountEmail && customerEmail !== accountEmail) {
         return res.status(400).json({ message: 'Contact email must match your account email.' });
       }
 
       const requestDoc = await DesignServiceRequest.create({
-        user: req.user._id,
+        user: req.user?._id || null,
         requestKind: 'paid',
         title: trim(req.body.title),
         brief: trim(req.body.brief),
@@ -153,9 +160,9 @@ router.post(
         priceAmount: pricing.price,
         currency: pricing.currency,
         vatInclusive: pricing.vatInclusive,
-        customerName: trim(req.body.customerName || req.user.name),
-        customerEmail: accountEmail,
-        customerPhone: trim(req.body.customerPhone || req.user.phone),
+        customerName: trim(req.body.customerName || req.user?.name),
+        customerEmail: accountEmail || customerEmail,
+        customerPhone: trim(req.body.customerPhone || req.user?.phone),
         customerAddress: trim(req.body.customerAddress),
         customerCity: trim(req.body.customerCity),
         customerPostalCode: trim(req.body.customerPostalCode),

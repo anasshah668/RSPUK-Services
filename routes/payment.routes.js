@@ -556,36 +556,56 @@ router.post("/worldpay/charge", optionalAuth, async (req, res) => {
 
     let designServiceRequestDoc = null;
     if (isDesignServiceCheckout) {
-      if (!req.user?._id) {
-        return res.status(401).json({
-          message: "Authentication required. Sign in to pay for design service.",
-        });
-      }
-
       if (!designServiceRequestId) {
         return res.status(400).json({
           message: "Design service payment requires a valid designServiceRequestId.",
         });
       }
 
-      const accountEmail = trim(req.user.email).toLowerCase();
       const payerEmail = trim(customerInfo.email).toLowerCase();
-      if (!payerEmail || !accountEmail || payerEmail !== accountEmail) {
+      if (!payerEmail) {
+        return res.status(400).json({
+          message: "A valid customer email is required to pay for design service.",
+        });
+      }
+
+      const accountEmail = trim(req.user?.email || "").toLowerCase();
+      if (accountEmail && payerEmail !== accountEmail) {
         return res.status(403).json({
           message: "Payment email must match your signed-in account email.",
         });
       }
 
-      designServiceRequestDoc = await DesignServiceRequest.findOne({
+      const designServiceQuery = {
         _id: designServiceRequestId,
-        user: req.user._id,
         paymentStatus: "pending",
         status: "awaiting_payment",
-      });
+      };
+      // Logged-in users can only pay for their own request; guests pay by request id + email match below.
+      if (req.user?._id) {
+        designServiceQuery.$or = [
+          { user: req.user._id },
+          { user: null, customerEmail: payerEmail },
+        ];
+      }
+
+      designServiceRequestDoc = await DesignServiceRequest.findOne(designServiceQuery);
       if (!designServiceRequestDoc) {
         return res.status(404).json({
           message: "Design service request not found or already paid.",
         });
+      }
+
+      const requestEmail = trim(designServiceRequestDoc.customerEmail).toLowerCase();
+      if (requestEmail && requestEmail !== payerEmail) {
+        return res.status(403).json({
+          message: "Payment email must match the email on the design request.",
+        });
+      }
+
+      // Attach guest request to the signed-in account when they pay while logged in.
+      if (req.user?._id && !designServiceRequestDoc.user) {
+        designServiceRequestDoc.user = req.user._id;
       }
 
       const designServiceLines = lineItems.filter(
