@@ -1,6 +1,7 @@
 import {
   S3Client,
   PutObjectCommand,
+  GetObjectCommand,
   GetBucketCorsCommand,
   PutBucketCorsCommand,
 } from '@aws-sdk/client-s3';
@@ -92,6 +93,88 @@ const buildKey = (folder, originalName, mimetype) => {
 const publicUrlForKey = (key) => {
   if (publicBase) return `${publicBase}/${key.split('/').map(encodeURIComponent).join('/')}`;
   return `https://${bucket}.s3.${region}.amazonaws.com/${key.split('/').map(encodeURIComponent).join('/')}`;
+};
+
+export const keyFromStoredValue = (urlOrKey) => {
+  const value = String(urlOrKey || '').trim();
+  if (!value) return '';
+  if (!/^https?:\/\//i.test(value)) {
+    return value.replace(/^\/+/, '');
+  }
+  try {
+    const parsed = new URL(value);
+    const pathname = decodeURIComponent(parsed.pathname.replace(/^\/+/, ''));
+    if (
+      parsed.hostname === `${bucket}.s3.${region}.amazonaws.com` ||
+      parsed.hostname.startsWith(`${bucket}.s3.`)
+    ) {
+      return pathname;
+    }
+    if (parsed.hostname.includes('amazonaws.com') && bucket && pathname.startsWith(`${bucket}/`)) {
+      return pathname.slice(bucket.length + 1);
+    }
+    const mediaIdx = pathname.indexOf('api/media/');
+    if (mediaIdx >= 0) return pathname.slice(mediaIdx + 'api/media/'.length);
+    if (publicBase) {
+      const baseHost = new URL(publicBase).hostname;
+      if (parsed.hostname === baseHost && pathname) return pathname;
+    }
+  } catch {
+    return '';
+  }
+  return '';
+};
+
+const isS3Stored = (url, publicId) => {
+  const value = String(url || '');
+  if (value.includes('cloudinary.com')) return false;
+  if (value.includes('amazonaws.com') || value.includes('X-Amz-Algorithm')) return true;
+  if (publicBase && value.startsWith(publicBase)) return true;
+  if (value.includes('/api/media/')) return true;
+  return String(publicId || '').startsWith('printing-platform/');
+};
+
+export const persistImageRecord = (img) => {
+  if (typeof img === 'string') {
+    img = { url: img };
+  }
+  const url = String(img?.url || '').trim();
+  const publicId = String(img?.publicId || '').trim() || keyFromStoredValue(url);
+  if (!url && !publicId) return null;
+  if (isS3Stored(url, publicId)) {
+    const key = keyFromStoredValue(url) || publicId;
+    if (!key) return url ? { url, publicId } : null;
+    return { publicId: key, url: publicUrlForKey(key) };
+  }
+  return { url, publicId };
+};
+
+export const signedReadUrl = async (key, expiresIn = 60 * 60 * 24 * 6) => {
+  assertS3Config();
+  const command = new GetObjectCommand({
+    Bucket: bucket,
+    Key: key,
+  });
+  return getSignedUrl(s3, command, { expiresIn });
+};
+
+export const withReadableUrl = async (img) => {
+  const persisted = persistImageRecord(img);
+  if (!persisted) return null;
+  if (!isS3Stored(persisted.url, persisted.publicId)) return persisted;
+  const key = persisted.publicId || keyFromStoredValue(persisted.url);
+  if (!key) return persisted;
+  try {
+    return { ...persisted, url: await signedReadUrl(key) };
+  } catch (error) {
+    console.warn('[s3] Could not sign read URL:', error?.message || error);
+    return persisted;
+  }
+};
+
+export const withReadableUrls = async (images) => {
+  const list = await Promise.all((Array.isArray(images) ? images : []).map(withReadableUrl));
+  return list.filter(Boolean);
 };
 
 const assertS3Config = () => {
