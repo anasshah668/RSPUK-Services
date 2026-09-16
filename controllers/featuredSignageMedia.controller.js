@@ -1,5 +1,5 @@
 import FeaturedSignageMedia from '../models/FeaturedSignageMedia.js';
-import { uploadMultipleToCloudinary } from '../config/cloudinary.js';
+import { uploadMultipleToS3 } from '../config/s3.js';
 
 const normalizeSlug = (slug) => String(slug || '').trim().toLowerCase();
 
@@ -105,7 +105,7 @@ export const updateFeaturedSignageMediaAdmin = async (req, res) => {
 
     let uploadedImages = [];
     if (Array.isArray(req.files) && req.files.length > 0) {
-      uploadedImages = await uploadMultipleToCloudinary(
+      uploadedImages = await uploadMultipleToS3(
         req.files,
         'printing-platform/featured-signage',
       );

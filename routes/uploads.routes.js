@@ -1,11 +1,11 @@
 import express from 'express';
 import { protect } from '../middleware/auth.js';
-import { artworkUpload, uploadArtworkToCloudinary } from '../config/cloudinary.js';
+import { artworkUpload, uploadArtworkToS3 } from '../config/s3.js';
 
 const router = express.Router();
 
 // @route   POST /api/uploads/artwork
-// @desc    Upload a single artwork file (image or PDF) to Cloudinary
+// @desc    Upload a single artwork file (image or PDF) to S3
 //          and return its hosted URL. Used by the product detail page so
 //          we can pass a real `fileUrls` entry to Tradeprint at checkout.
 // @access  Private
@@ -27,9 +27,11 @@ router.post(
         return res.status(400).json({ message: 'No artwork file uploaded.' });
       }
 
-      const result = await uploadArtworkToCloudinary(
+      const result = await uploadArtworkToS3(
         req.file.buffer,
         req.file.originalname,
+        'printing-platform/artwork',
+        req.file.mimetype,
       );
 
       res.status(201).json({

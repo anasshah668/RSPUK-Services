@@ -3,7 +3,7 @@ import { body, validationResult } from "express-validator";
 import sgMail from "@sendgrid/mail";
 import Quote from "../models/Quote.js";
 import { protect, admin } from "../middleware/auth.js";
-import { upload, uploadToCloudinary } from "../config/cloudinary.js";
+import { upload, uploadToS3 } from "../config/s3.js";
 
 const router = express.Router();
 
@@ -35,9 +35,13 @@ router.post(
       }
 
       if (req.file?.buffer) {
-        const uploadedArtwork = await uploadToCloudinary(
+        const uploadedArtwork = await uploadToS3(
           req.file.buffer,
           "printing-platform/quotes",
+          {
+            originalName: req.file.originalname,
+            mimetype: req.file.mimetype,
+          },
         );
         payload.artworkUrl = uploadedArtwork.url;
         payload.artworkPublicId = uploadedArtwork.publicId;

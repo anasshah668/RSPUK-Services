@@ -3,7 +3,7 @@ import SiteSetting from '../models/SiteSetting.js';
 import GalleryProject from '../models/GalleryProject.js';
 import Faq from '../models/Faq.js';
 import { protect, admin } from '../middleware/auth.js';
-import { upload, uploadMultipleToCloudinary } from '../config/cloudinary.js';
+import { upload, uploadMultipleToS3 } from '../config/s3.js';
 import {
   getDesignServicePrice,
   saveDesignServicePrice,
@@ -130,7 +130,7 @@ router.post('/gallery-projects', protect, admin, (req, res, next) => {
 
     let uploadedImages = [];
     if (Array.isArray(req.files) && req.files.length > 0) {
-      uploadedImages = await uploadMultipleToCloudinary(req.files, 'printing-platform/gallery');
+      uploadedImages = await uploadMultipleToS3(req.files, 'printing-platform/gallery');
     }
     if (!uploadedImages.length) {
       return res.status(400).json({ message: 'At least one gallery image is required' });
@@ -177,7 +177,7 @@ router.put('/gallery-projects/:id', protect, admin, (req, res, next) => {
 
     let uploadedImages = [];
     if (Array.isArray(req.files) && req.files.length > 0) {
-      uploadedImages = await uploadMultipleToCloudinary(req.files, 'printing-platform/gallery');
+      uploadedImages = await uploadMultipleToS3(req.files, 'printing-platform/gallery');
     }
 
     const mergedImages = [...existingImages, ...uploadedImages]

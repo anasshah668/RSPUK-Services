@@ -19,7 +19,7 @@ import {
   deleteFeaturedSignageMediaAdmin,
 } from "../controllers/featuredSignageMedia.controller.js";
 import { protect, admin } from "../middleware/auth.js";
-import { upload, uploadMultipleToCloudinary } from "../config/cloudinary.js";
+import { upload, uploadMultipleToS3 } from "../config/s3.js";
 import {
   listCheckoutOrders,
   normalizeCheckoutRowForAdmin,
@@ -81,15 +81,15 @@ router.post(
       let images = [];
 
       if (req.files && req.files.length > 0) {
-        console.log("Uploading files to Cloudinary...");
+        console.log("Uploading files to S3...");
         try {
-          images = await uploadMultipleToCloudinary(
+          images = await uploadMultipleToS3(
             req.files,
             "printing-platform/products",
           );
           console.log("Files uploaded successfully:", images.length);
         } catch (uploadError) {
-          console.error("Cloudinary upload error:", uploadError);
+          console.error("S3 upload error:", uploadError);
           return res.status(500).json({
             message: `Failed to upload images: ${uploadError.message}`,
           });
@@ -209,7 +209,7 @@ router.put(
 
       // Handle new image uploads
       if (req.files && req.files.length > 0) {
-        const newImages = await uploadMultipleToCloudinary(
+        const newImages = await uploadMultipleToS3(
           req.files,
           "printing-platform/products",
         );

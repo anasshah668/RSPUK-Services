@@ -3,7 +3,7 @@ import { body, validationResult } from 'express-validator';
 import DesignServiceRequest from '../models/DesignServiceRequest.js';
 import { protect, admin } from '../middleware/auth.js';
 import { optionalAuth } from '../middleware/optionalAuth.js';
-import { artworkUpload, uploadArtworkToCloudinary } from '../config/cloudinary.js';
+import { artworkUpload, uploadArtworkToS3 } from '../config/s3.js';
 import { getDesignServicePrice } from '../services/designServicePrice.js';
 
 const router = express.Router();
@@ -15,10 +15,11 @@ const uploadReferenceFiles = async (files) => {
   if (!Array.isArray(files)) return referenceFiles;
 
   for (const file of files) {
-    const uploaded = await uploadArtworkToCloudinary(
+    const uploaded = await uploadArtworkToS3(
       file.buffer,
       file.originalname,
       'printing-platform/design-service/references',
+      file.mimetype,
     );
     referenceFiles.push({
       url: uploaded.url,
@@ -261,10 +262,11 @@ router.post(
         return res.status(404).json({ message: 'Design request not found' });
       }
 
-      const uploaded = await uploadArtworkToCloudinary(
+      const uploaded = await uploadArtworkToS3(
         req.file.buffer,
         req.file.originalname,
         `printing-platform/design-service/deliverables/${requestDoc._id}`,
+        req.file.mimetype,
       );
 
       const deliverable = {
