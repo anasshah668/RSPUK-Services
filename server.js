@@ -86,6 +86,14 @@ app.get('/api/health', (req, res) => {
       readyState: getDbReadyState(),
       readyStateName: stateNames[getDbReadyState()] ?? 'unknown',
     },
+    uploads: {
+      s3: Boolean(
+        process.env.AWS_REGION &&
+          process.env.S3_BUCKET &&
+          process.env.AWS_ACCESS_KEY_ID &&
+          process.env.AWS_SECRET_ACCESS_KEY,
+      ),
+    },
   });
 });
 

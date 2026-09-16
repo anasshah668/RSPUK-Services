@@ -109,9 +109,16 @@ export const updateFeaturedSignageMediaAdmin = async (req, res) => {
         req.files,
         'printing-platform/featured-signage',
       );
+    } else {
+      uploadedImages = normalizeImages(req.body?.uploadedImages);
     }
 
     const mergedImages = normalizeImages([...existingImages, ...uploadedImages]);
+    if (mergedImages.length === 0) {
+      return res.status(400).json({
+        message: 'Add at least one image. If you did, the files never reached the server — try again or upload fewer/smaller pictures.',
+      });
+    }
 
     const row = await FeaturedSignageMedia.findOneAndUpdate(
       { categorySlug },

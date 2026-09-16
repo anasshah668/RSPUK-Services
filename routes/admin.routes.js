@@ -19,7 +19,7 @@ import {
   deleteFeaturedSignageMediaAdmin,
 } from "../controllers/featuredSignageMedia.controller.js";
 import { protect, admin } from "../middleware/auth.js";
-import { upload, uploadMultipleToS3 } from "../config/s3.js";
+import { IMAGE_MIME, presignPutObject, upload, uploadMultipleToS3 } from "../config/s3.js";
 import {
   listCheckoutOrders,
   normalizeCheckoutRowForAdmin,
@@ -450,11 +450,34 @@ router.get("/featured-signage-pricing", listFeaturedSignagePricingAdmin);
 router.get("/featured-signage-pricing/:categorySlug", getFeaturedSignagePricingAdmin);
 router.put("/featured-signage-pricing/:categorySlug", updateFeaturedSignagePricingAdmin);
 
+router.post("/uploads/presign", async (req, res) => {
+  try {
+    const fileName = String(req.body?.fileName || "").trim();
+    const contentType = String(req.body?.contentType || "").trim().toLowerCase();
+    const folder = String(req.body?.folder || "printing-platform").trim();
+    if (!fileName || !contentType) {
+      return res.status(400).json({ message: "fileName and contentType are required" });
+    }
+    if (!IMAGE_MIME.has(contentType)) {
+      return res.status(400).json({ message: "Invalid file type. Only JPEG, PNG, GIF, and WebP are allowed." });
+    }
+    const result = await presignPutObject({ fileName, contentType, folder });
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message || "Failed to prepare S3 upload" });
+  }
+});
+
 router.get("/featured-signage-media", listFeaturedSignageMediaAdmin);
 router.get("/featured-signage-media/:categorySlug", getFeaturedSignageMediaAdmin);
 router.put("/featured-signage-media/:categorySlug", (req, res, next) => {
+  const contentType = String(req.headers["content-type"] || "");
+  if (!contentType.includes("multipart/form-data")) return next();
   upload.array("images", 20)(req, res, (err) => {
-    if (err) return res.status(400).json({ message: err.message });
+    if (err) {
+      const status = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
+      return res.status(status).json({ message: err.message });
+    }
     next();
   });
 }, updateFeaturedSignageMediaAdmin);

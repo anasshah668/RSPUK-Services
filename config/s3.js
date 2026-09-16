@@ -1,4 +1,10 @@
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  GetBucketCorsCommand,
+  PutBucketCorsCommand,
+} from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import multer from 'multer';
 import path from 'path';
 import crypto from 'crypto';
@@ -9,7 +15,9 @@ const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
 const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
 const publicBase = String(process.env.S3_PUBLIC_BASE || '').replace(/\/+$/, '');
 
-if (!region || !bucket || !accessKeyId || !secretAccessKey) {
+export const isS3Configured = Boolean(region && bucket && accessKeyId && secretAccessKey);
+
+if (!isS3Configured) {
   console.warn('⚠️  AWS S3 credentials not found in environment variables');
   console.warn('   Set AWS_REGION, S3_BUCKET, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY');
 } else {
@@ -22,11 +30,13 @@ const s3 = new S3Client({
     accessKeyId,
     secretAccessKey,
   },
+  requestChecksumCalculation: 'WHEN_REQUIRED',
+  responseChecksumValidation: 'WHEN_REQUIRED',
 });
 
 const storage = multer.memoryStorage();
 
-const IMAGE_MIME = new Set([
+export const IMAGE_MIME = new Set([
   'image/jpeg',
   'image/jpg',
   'image/png',
@@ -85,9 +95,23 @@ const publicUrlForKey = (key) => {
 };
 
 const assertS3Config = () => {
-  if (!region || !bucket || !accessKeyId || !secretAccessKey) {
-    throw new Error('S3 is not configured. Check AWS_REGION, S3_BUCKET, and AWS credentials.');
+  if (!isS3Configured) {
+    throw new Error(
+      'S3 is not configured. Set AWS_REGION, S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and S3_PUBLIC_BASE on the server.',
+    );
   }
+};
+
+const describeS3Error = (error) => {
+  const status = error?.$metadata?.httpStatusCode;
+  const code = error?.name || error?.Code || '';
+  if (status === 403 || code === 'AccessDenied' || code === 'InvalidAccessKeyId' || code === 'SignatureDoesNotMatch') {
+    return 'S3 denied the upload. Check the AWS keys, bucket name, region, and PutObject permission.';
+  }
+  if (status === 404 || code === 'NoSuchBucket' || code === 'NotFound') {
+    return 'S3 bucket was not found. Check S3_BUCKET and AWS_REGION.';
+  }
+  return error?.message || 'S3 upload failed';
 };
 
 const putObject = async ({ buffer, key, contentType }) => {
@@ -96,14 +120,19 @@ const putObject = async ({ buffer, key, contentType }) => {
     throw new Error('File buffer is empty');
   }
 
-  await s3.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: buffer,
-      ContentType: contentType || 'application/octet-stream',
-    }),
-  );
+  try {
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: buffer,
+        ContentType: contentType || 'application/octet-stream',
+        ContentLength: buffer.length,
+      }),
+    );
+  } catch (error) {
+    throw new Error(describeS3Error(error));
+  }
 
   return {
     url: publicUrlForKey(key),
@@ -112,10 +141,47 @@ const putObject = async ({ buffer, key, contentType }) => {
   };
 };
 
+let corsReady;
+const ensureS3BrowserCors = async () => {
+  if (corsReady) return corsReady;
+  corsReady = (async () => {
+    assertS3Config();
+    try {
+      await s3.send(new GetBucketCorsCommand({ Bucket: bucket }));
+      return;
+    } catch (err) {
+      if (err?.name !== 'NoSuchCORSConfiguration' && err?.$metadata?.httpStatusCode !== 404) {
+        console.warn('[s3] Could not read bucket CORS:', err?.message || err);
+      }
+    }
+    try {
+      await s3.send(
+        new PutBucketCorsCommand({
+          Bucket: bucket,
+          CORSConfiguration: {
+            CORSRules: [
+              {
+                AllowedHeaders: ['*'],
+                AllowedMethods: ['GET', 'PUT', 'HEAD'],
+                AllowedOrigins: ['*'],
+                ExposeHeaders: ['ETag', 'Location'],
+                MaxAgeSeconds: 3600,
+              },
+            ],
+          },
+        }),
+      );
+    } catch (err) {
+      console.warn('[s3] Could not set bucket CORS for browser uploads:', err?.message || err);
+    }
+  })();
+  return corsReady;
+};
+
 export const upload = multer({
   storage,
   limits: {
-    fileSize: 5 * 1024 * 1024,
+    fileSize: 8 * 1024 * 1024,
   },
   fileFilter: (req, file, cb) => {
     if (IMAGE_MIME.has(file.mimetype)) {
@@ -192,6 +258,33 @@ export const uploadArtworkToS3 = async (
     format: ext,
     bytes: buffer?.length || 0,
     originalFilename: path.parse(originalName || 'file').name,
+  };
+};
+
+export const presignPutObject = async ({
+  fileName,
+  contentType,
+  folder = 'printing-platform',
+} = {}) => {
+  assertS3Config();
+  const type = String(contentType || '').trim().toLowerCase();
+  if (!IMAGE_MIME.has(type)) {
+    throw new Error('Invalid file type. Only JPEG, PNG, GIF, and WebP are allowed.');
+  }
+  await ensureS3BrowserCors();
+  const key = buildKey(folder, fileName, type);
+  const command = new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    ContentType: type,
+  });
+  const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 60 });
+  return {
+    uploadUrl,
+    key,
+    publicId: key,
+    publicUrl: publicUrlForKey(key),
+    contentType: type,
   };
 };
 
