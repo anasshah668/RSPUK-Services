@@ -158,19 +158,7 @@ export const signedReadUrl = async (key, expiresIn = 60 * 60 * 24 * 6) => {
   return getSignedUrl(s3, command, { expiresIn });
 };
 
-export const withReadableUrl = async (img) => {
-  const persisted = persistImageRecord(img);
-  if (!persisted) return null;
-  if (!isS3Stored(persisted.url, persisted.publicId)) return persisted;
-  const key = persisted.publicId || keyFromStoredValue(persisted.url);
-  if (!key) return persisted;
-  try {
-    return { ...persisted, url: await signedReadUrl(key) };
-  } catch (error) {
-    console.warn('[s3] Could not sign read URL:', error?.message || error);
-    return persisted;
-  }
-};
+export const withReadableUrl = async (img) => persistImageRecord(img);
 
 export const withReadableUrls = async (images) => {
   const list = await Promise.all((Array.isArray(images) ? images : []).map(withReadableUrl));
