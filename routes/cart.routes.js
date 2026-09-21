@@ -199,17 +199,38 @@ router.delete("/items/:lineId", withCart, async (req, res) => {
 router.patch("/items/:lineId", withCart, async (req, res) => {
   try {
     const { lineId } = req.params;
-    const quantity = Number(req.body?.quantity);
     const cart = req.cart;
     const line = cart.items.find((i) => i.lineId === lineId);
     if (!line) {
       return res.status(404).json({ message: "Basket line not found" });
     }
-    if (!Number.isFinite(quantity) || quantity < 1) {
-      cart.items = cart.items.filter((i) => i.lineId !== lineId);
-    } else {
-      line.quantity = Math.floor(quantity);
+
+    const incomingItem =
+      req.body?.item && typeof req.body.item === "object" ? { ...req.body.item } : null;
+    if (incomingItem) {
+      delete incomingItem.quantity;
+      delete incomingItem.lineId;
+      if (incomingItem.id == null || String(incomingItem.id).trim() === "") {
+        return res.status(400).json({ message: "item with id is required" });
+      }
+      line.payload = incomingItem;
     }
+
+    const quantityRaw =
+      req.body?.quantity !== undefined && req.body?.quantity !== null && req.body?.quantity !== ""
+        ? req.body.quantity
+        : incomingItem
+          ? req.body?.item?.quantity
+          : undefined;
+    if (quantityRaw !== undefined) {
+      const quantity = Number(quantityRaw);
+      if (!Number.isFinite(quantity) || quantity < 1) {
+        cart.items = cart.items.filter((i) => i.lineId !== lineId);
+      } else {
+        line.quantity = Math.floor(quantity);
+      }
+    }
+
     await cart.save();
     res.json({ items: cart.items.map(formatLineForClient) });
   } catch (error) {
