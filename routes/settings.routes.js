@@ -118,7 +118,15 @@ router.get('/gallery-projects/admin', protect, admin, async (req, res) => {
 // Admin: create gallery project
 router.post('/gallery-projects', protect, admin, (req, res, next) => {
   upload.array('images', 20)(req, res, (err) => {
-    if (err) return res.status(400).json({ message: err.message });
+    if (err) {
+      const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(status).json({
+        message:
+          err.code === 'LIMIT_FILE_SIZE'
+            ? 'Each picture must be under 8 MB. Compress it or upload one at a time.'
+            : err.message || 'Upload failed',
+      });
+    }
     next();
   });
 }, async (req, res) => {
@@ -149,7 +157,15 @@ router.post('/gallery-projects', protect, admin, (req, res, next) => {
 // Admin: update gallery project
 router.put('/gallery-projects/:id', protect, admin, (req, res, next) => {
   upload.array('images', 20)(req, res, (err) => {
-    if (err) return res.status(400).json({ message: err.message });
+    if (err) {
+      const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(status).json({
+        message:
+          err.code === 'LIMIT_FILE_SIZE'
+            ? 'Each picture must be under 8 MB. Compress it or upload one at a time.'
+            : err.message || 'Upload failed',
+      });
+    }
     next();
   });
 }, async (req, res) => {
