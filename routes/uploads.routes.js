@@ -1,8 +1,59 @@
 import express from 'express';
 import { protect } from '../middleware/auth.js';
-import { artworkUpload, uploadArtworkToS3 } from '../config/s3.js';
+import {
+  artworkUpload,
+  ensureS3BrowserCors,
+  isAllowedStoredKey,
+  streamStoredObject,
+  uploadArtworkToS3,
+} from '../config/s3.js';
 
 const router = express.Router();
+
+ensureS3BrowserCors();
+
+const pipeS3Body = async (body, res) => {
+  if (body?.pipe) {
+    body.pipe(res);
+    return;
+  }
+  const bytes = await body.transformToByteArray();
+  res.send(Buffer.from(bytes));
+};
+
+// @route   GET /api/uploads/file
+// @desc    Stream an S3 artwork/media file through the API so riversigns.co.uk
+//          can preview PDFs without depending on bucket CORS.
+// @access  Public (only printing-platform/* keys)
+router.get('/file', async (req, res) => {
+  try {
+    const fileUrl = String(req.query.url || req.query.key || '').trim();
+    if (!fileUrl || !isAllowedStoredKey(fileUrl)) {
+      return res.status(400).json({ message: 'Invalid file URL' });
+    }
+
+    const object = await streamStoredObject(fileUrl, { range: req.headers.range });
+    if (object.ContentType) res.setHeader('Content-Type', object.ContentType);
+    if (object.ContentLength != null) res.setHeader('Content-Length', String(object.ContentLength));
+    if (object.ContentRange) {
+      res.setHeader('Content-Range', object.ContentRange);
+      res.status(206);
+    } else {
+      res.status(200);
+    }
+    res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.setHeader('Accept-Ranges', 'bytes');
+    await pipeS3Body(object.Body, res);
+  } catch (error) {
+    const status = error?.status || error?.$metadata?.httpStatusCode || 500;
+    if (!res.headersSent) {
+      res.status(status).json({
+        message: status === 404 ? 'File not found' : error.message || 'Could not load file',
+      });
+    }
+  }
+});
 
 // @route   POST /api/uploads/artwork
 // @desc    Upload a single artwork file (image or PDF) to S3

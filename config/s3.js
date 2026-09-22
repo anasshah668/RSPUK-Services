@@ -2,7 +2,6 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
-  GetBucketCorsCommand,
   PutBucketCorsCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -212,38 +211,67 @@ const putObject = async ({ buffer, key, contentType }) => {
   };
 };
 
+export const S3_BROWSER_ORIGINS = [
+  'https://riversigns.co.uk',
+  'https://www.riversigns.co.uk',
+  'https://rspuk.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:3000',
+];
+
+export const S3_CORS_RULES = [
+  {
+    AllowedHeaders: ['*'],
+    AllowedMethods: ['GET', 'HEAD', 'PUT', 'POST'],
+    AllowedOrigins: S3_BROWSER_ORIGINS,
+    ExposeHeaders: ['ETag', 'Location', 'Content-Type', 'Content-Length', 'Accept-Ranges', 'Content-Range'],
+    MaxAgeSeconds: 3600,
+  },
+];
+
+export const isAllowedStoredKey = (urlOrKey) => {
+  const key = keyFromStoredValue(urlOrKey) || String(urlOrKey || '').replace(/^\/+/, '');
+  return key.startsWith('printing-platform/');
+};
+
+export const streamStoredObject = async (urlOrKey, { range } = {}) => {
+  assertS3Config();
+  const key = keyFromStoredValue(urlOrKey) || String(urlOrKey || '').replace(/^\/+/, '');
+  if (!key.startsWith('printing-platform/')) {
+    const error = new Error('Invalid file URL');
+    error.status = 400;
+    throw error;
+  }
+
+  return s3.send(
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Range: range || undefined,
+    }),
+  );
+};
+
+export const applyS3BrowserCors = async () => {
+  assertS3Config();
+  await s3.send(
+    new PutBucketCorsCommand({
+      Bucket: bucket,
+      CORSConfiguration: {
+        CORSRules: S3_CORS_RULES,
+      },
+    }),
+  );
+};
+
 let corsReady;
-const ensureS3BrowserCors = async () => {
+export const ensureS3BrowserCors = async () => {
   if (corsReady) return corsReady;
   corsReady = (async () => {
-    assertS3Config();
     try {
-      await s3.send(new GetBucketCorsCommand({ Bucket: bucket }));
-      return;
+      await applyS3BrowserCors();
     } catch (err) {
-      if (err?.name !== 'NoSuchCORSConfiguration' && err?.$metadata?.httpStatusCode !== 404) {
-        console.warn('[s3] Could not read bucket CORS:', err?.message || err);
-      }
-    }
-    try {
-      await s3.send(
-        new PutBucketCorsCommand({
-          Bucket: bucket,
-          CORSConfiguration: {
-            CORSRules: [
-              {
-                AllowedHeaders: ['*'],
-                AllowedMethods: ['GET', 'PUT', 'HEAD'],
-                AllowedOrigins: ['*'],
-                ExposeHeaders: ['ETag', 'Location'],
-                MaxAgeSeconds: 3600,
-              },
-            ],
-          },
-        }),
-      );
-    } catch (err) {
-      console.warn('[s3] Could not set bucket CORS for browser uploads:', err?.message || err);
+      console.warn('[s3] Could not set bucket CORS for riversigns.co.uk:', err?.message || err);
     }
   })();
   return corsReady;

@@ -1,0 +1,24 @@
+{
+  "CORSRules": [
+    {
+      "AllowedHeaders": ["*"],
+      "AllowedMethods": ["GET", "HEAD", "PUT", "POST"],
+      "AllowedOrigins": [
+        "https://riversigns.co.uk",
+        "https://www.riversigns.co.uk",
+        "https://rspuk.vercel.app",
+        "http://localhost:5173",
+        "http://localhost:3000"
+      ],
+      "ExposeHeaders": [
+        "ETag",
+        "Location",
+        "Content-Type",
+        "Content-Length",
+        "Accept-Ranges",
+        "Content-Range"
+      ],
+      "MaxAgeSeconds": 3600
+    }
+  ]
+}

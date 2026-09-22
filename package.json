@@ -7,7 +7,8 @@
   },
   "scripts": {
     "dev": "node server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "s3:cors": "node scripts/apply-s3-cors.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1133.0",
