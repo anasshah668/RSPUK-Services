@@ -1,7 +1,7 @@
 import express from "express";
 import { body, validationResult } from "express-validator";
-import sgMail from "@sendgrid/mail";
 import Quote from "../models/Quote.js";
+import { isSesConfigured, sendEmail } from "../config/ses.js";
 import { protect, admin } from "../middleware/auth.js";
 import { upload, uploadToS3 } from "../config/s3.js";
 
@@ -211,15 +211,11 @@ router.post("/:id/send-email", protect, admin, async (req, res) => {
         .json({ message: "Customer email is missing for this quote" });
     }
 
-    const sendGridApiKey = process.env.SENDGRID_API_KEY;
-    const senderEmail =
-      process.env.SENDGRID_FROM_EMAIL || process.env.MAIL_FROM;
-    if (!sendGridApiKey || !senderEmail) {
+    if (!isSesConfigured) {
       return res
         .status(500)
-        .json({ message: "SendGrid is not configured on server" });
+        .json({ message: "AWS SES is not configured on server" });
     }
-    sgMail.setApiKey(sendGridApiKey);
 
     const responseText = req.body?.adminResponse || quote.adminResponse || "";
     const quotedPrice = req.body?.quotedPrice ?? quote.quotedPrice;
@@ -379,8 +375,7 @@ router.post("/:id/send-email", protect, admin, async (req, res) => {
 </html>
 `;
 
-    await sgMail.send({
-      from: senderEmail,
+    await sendEmail({
       to: quote.email,
       subject,
       html,

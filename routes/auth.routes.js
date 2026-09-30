@@ -2,8 +2,8 @@ import express from "express";
 import { body, validationResult } from "express-validator";
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
-import sgMail from "@sendgrid/mail";
 import crypto from "crypto";
+import { isSesConfigured, sendEmail } from "../config/ses.js";
 import User from "../models/User.js";
 import SignupOtp from "../models/SignupOtp.js";
 import { protect } from "../middleware/auth.js";
@@ -72,9 +72,6 @@ const generateOtpCode = () =>
   String(Math.floor(100000 + Math.random() * 900000));
 
 const sendSignupOtpEmail = async ({ email, otp, name }) => {
-  const sendGridApiKey = process.env.SENDGRID_API_KEY;
-  const senderEmail = process.env.SENDGRID_FROM_EMAIL || process.env.MAIL_FROM;
-
   const subject = "Your River Sign & Printing One-Time Password";
   const logoUrl = `${frontendUrl.replace(/\/+$/, "")}/logo.png`;
   const html = `
@@ -108,23 +105,19 @@ const sendSignupOtpEmail = async ({ email, otp, name }) => {
     </div>
   `;
 
-  if (!sendGridApiKey || !senderEmail) {
+  if (!isSesConfigured) {
     console.log(`[Signup OTP] ${email} -> ${otp}`);
     return;
   }
 
-  sgMail.setApiKey(sendGridApiKey);
-  await sgMail.send({
+  await sendEmail({
     to: email,
-    from: senderEmail,
     subject,
     html,
   });
 };
 
 const sendPasswordResetEmail = async ({ email, name, resetToken, context }) => {
-  const sendGridApiKey = process.env.SENDGRID_API_KEY;
-  const senderEmail = process.env.SENDGRID_FROM_EMAIL || process.env.MAIL_FROM;
   const isAdmin = context === "admin";
   const resetPath = isAdmin ? "/admin/reset-password" : "/reset-password";
   const resetUrl = `${frontendUrl.replace(/\/+$/, "")}${resetPath}?token=${encodeURIComponent(resetToken)}`;
@@ -164,15 +157,13 @@ const sendPasswordResetEmail = async ({ email, name, resetToken, context }) => {
     </div>
   `;
 
-  if (!sendGridApiKey || !senderEmail) {
+  if (!isSesConfigured) {
     console.log(`[Password reset] ${email} -> ${resetUrl}`);
     return { sent: false, devResetUrl: resetUrl };
   }
 
-  sgMail.setApiKey(sendGridApiKey);
-  await sgMail.send({
+  await sendEmail({
     to: email,
-    from: senderEmail,
     subject,
     html,
   });

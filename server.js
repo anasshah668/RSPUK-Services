@@ -93,6 +93,12 @@ app.get('/api/health', (req, res) => {
           process.env.AWS_ACCESS_KEY_ID &&
           process.env.AWS_SECRET_ACCESS_KEY,
       ),
+      ses: Boolean(
+        (process.env.SES_REGION || process.env.AWS_REGION) &&
+          process.env.AWS_ACCESS_KEY_ID &&
+          process.env.AWS_SECRET_ACCESS_KEY &&
+          (process.env.SES_FROM_EMAIL || process.env.MAIL_FROM || process.env.SENDGRID_FROM_EMAIL),
+      ),
     },
   });
 });

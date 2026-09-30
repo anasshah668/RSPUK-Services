@@ -1,4 +1,4 @@
-import sgMail from '@sendgrid/mail';
+import { isSesConfigured, sendEmail } from '../config/ses.js';
 
 const trim = (value) => String(value ?? '').trim();
 
@@ -220,7 +220,7 @@ const buildReceiptHtml = ({
 };
 
 /**
- * Sends HTML + plain-text receipt (SendGrid). Fails soft — caller should catch.
+ * Sends HTML + plain-text receipt via AWS SES. Fails soft — caller should catch.
  */
 export async function sendPaymentReceiptEmail({
   to,
@@ -240,13 +240,10 @@ export async function sendPaymentReceiptEmail({
   const disabled = trim(process.env.RECEIPT_EMAIL_ENABLED).toLowerCase() === 'false';
   if (disabled) return { sent: false, reason: 'disabled' };
 
-  const sendGridApiKey = process.env.SENDGRID_API_KEY;
-  const senderEmail = process.env.SENDGRID_FROM_EMAIL || process.env.MAIL_FROM;
-  if (!sendGridApiKey || !senderEmail) {
-    console.warn('[receipt-mail] SendGrid is not configured on server');
-    return { sent: false, reason: 'no_sendgrid' };
+  if (!isSesConfigured) {
+    console.warn('[receipt-mail] AWS SES is not configured on server');
+    return { sent: false, reason: 'no_ses' };
   }
-  sgMail.setApiKey(sendGridApiKey);
 
   const subject = trim(process.env.RECEIPT_EMAIL_SUBJECT_PREFIX) || 'Payment receipt';
   const payload = {
@@ -267,15 +264,14 @@ export async function sendPaymentReceiptEmail({
   const html = buildReceiptHtml(payload);
 
   try {
-    await sgMail.send({
-      from: senderEmail,
+    await sendEmail({
       to,
       subject: `${subject} — ${orderReference}`,
       text,
       html,
     });
   } catch (err) {
-    console.error('[receipt-mail] SendGrid send failed', err?.response?.body || err?.message || err);
+    console.error('[receipt-mail] SES send failed', err?.message || err);
     return { sent: false, reason: 'send_failed' };
   }
 
