@@ -6,6 +6,7 @@ import crypto from "crypto";
 import { isSesConfigured, sendEmail } from "../config/ses.js";
 import User from "../models/User.js";
 import SignupOtp from "../models/SignupOtp.js";
+import PasswordResetOtp from "../models/PasswordResetOtp.js";
 import { protect } from "../middleware/auth.js";
 import { adminAuthRateLimit, adminAuthRateLimitIfAdminContext } from "../middleware/adminAuthRateLimit.js";
 import { requireAdminGate, requireAdminGateForAdminContext } from "../middleware/requireAdminGate.js";
@@ -70,6 +71,15 @@ const performLocalLogin = async ({ email, password, requireAdmin = false }) => {
 
 const generateOtpCode = () =>
   String(Math.floor(100000 + Math.random() * 900000));
+
+const hashOtp = (otp) => crypto.createHash("sha256").update(String(otp)).digest("hex");
+
+const otpCodesMatch = (stored, provided) => {
+  const a = Buffer.from(String(stored || ""));
+  const b = Buffer.from(hashOtp(provided));
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+};
 
 const sendSignupOtpEmail = async ({ email, otp, name }) => {
   const subject = "Your River Sign & Printing One-Time Password";
@@ -160,6 +170,53 @@ const sendPasswordResetEmail = async ({ email, name, resetToken, context }) => {
   if (!isSesConfigured) {
     console.log(`[Password reset] ${email} -> ${resetUrl}`);
     return { sent: false, devResetUrl: resetUrl };
+  }
+
+  await sendEmail({
+    to: email,
+    subject,
+    html,
+  });
+  return { sent: true };
+};
+
+const sendPasswordResetOtpEmail = async ({ email, otp, name }) => {
+  const subject = "Your River Sign & Printing password reset code";
+  const logoUrl = `${frontendUrl.replace(/\/+$/, "")}/logo.png`;
+  const html = `
+    <div style="background:#f4f6fb;padding:24px 0;font-family:Arial,sans-serif;color:#111827">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">
+        <tr>
+          <td style="background:linear-gradient(90deg,#1d4ed8,#2563eb);padding:18px 24px;color:#ffffff">
+            <img src="${logoUrl}" alt="River Sign & Printing" style="height:44px;max-width:180px;object-fit:contain;display:block;margin-bottom:10px" />
+            <h2 style="margin:0;font-size:20px;font-weight:700">River Sign &amp; Printing</h2>
+            <p style="margin:6px 0 0;font-size:13px;opacity:0.95">Password reset verification</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px">
+            <p style="margin:0 0 12px;font-size:15px">Hello ${name || "there"},</p>
+            <p style="margin:0 0 12px;font-size:15px;line-height:1.7">
+              Use this one-time password to reset your River Signs &amp; Print account password:
+            </p>
+            <div style="margin:18px 0;padding:14px 18px;background:#eff6ff;border:1px dashed #60a5fa;border-radius:10px;text-align:center">
+              <span style="font-size:30px;letter-spacing:6px;font-weight:700;color:#1d4ed8">${otp}</span>
+            </div>
+            <p style="margin:0 0 10px;font-size:14px;color:#374151">
+              This code will expire in <strong>10 minutes</strong>.
+            </p>
+            <p style="margin:0;font-size:12px;color:#6b7280">
+              If you did not request a password reset, you can ignore this email.
+            </p>
+          </td>
+        </tr>
+      </table>
+    </div>
+  `;
+
+  if (!isSesConfigured) {
+    console.log(`[Password reset OTP] ${email} -> ${otp}`);
+    return { sent: false };
   }
 
   await sendEmail({
@@ -523,7 +580,7 @@ router.get("/me", protect, async (req, res) => {
 });
 
 // @route   POST /api/auth/forgot-password
-// @desc    Request password reset email
+// @desc    Send a password-reset OTP (customers) or reset link (admin)
 // @access  Public
 router.post(
   "/forgot-password",
@@ -541,7 +598,9 @@ router.post(
     try {
       const email = safeEmail(req.body.email);
       const context = req.body.context === "admin" ? "admin" : "user";
-      const genericMessage =
+      const otpMessage =
+        "If an account with that email exists, a verification code has been sent.";
+      const linkMessage =
         "If an account with that email exists, a password reset link has been sent.";
 
       if (!email) {
@@ -549,13 +608,49 @@ router.post(
       }
 
       const user = await User.findOne({ email });
+      const genericPayload = {
+        message: context === "admin" ? linkMessage : otpMessage,
+        expiresInSeconds: Math.floor(SIGNUP_OTP_TTL_MS / 1000),
+      };
+
       if (!user) {
-        return res.json({ message: genericMessage });
+        return res.json(genericPayload);
       }
 
       const isAdminRequest = context === "admin";
       if (isAdminRequest && user.role !== "admin") {
-        return res.json({ message: genericMessage });
+        return res.json(genericPayload);
+      }
+
+      if (!isAdminRequest) {
+        const otp = generateOtpCode();
+        await PasswordResetOtp.findOneAndUpdate(
+          { email },
+          {
+            $set: {
+              email,
+              otp: hashOtp(otp),
+              expiresAt: new Date(Date.now() + SIGNUP_OTP_TTL_MS),
+            },
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true },
+        );
+
+        try {
+          await sendPasswordResetOtpEmail({
+            email: user.email,
+            name: user.name,
+            otp,
+          });
+        } catch (mailErr) {
+          console.error("[forgot-password] OTP email failed", mailErr);
+          await PasswordResetOtp.deleteOne({ email });
+          return res.status(500).json({
+            message: "Could not send the verification code. Please try again later.",
+          });
+        }
+
+        return res.json(genericPayload);
       }
 
       const resetToken = user.createPasswordResetToken();
@@ -578,7 +673,71 @@ router.post(
         });
       }
 
-      res.json({ message: genericMessage });
+      res.json(genericPayload);
+    } catch (error) {
+      res.status(500).json({ message: error.message });
+    }
+  },
+);
+
+// @route   POST /api/auth/forgot-password/verify-otp
+// @desc    Verify reset OTP and set a new password
+// @access  Public
+router.post(
+  "/forgot-password/verify-otp",
+  rejectDangerousAuthBody,
+  [
+    body("email")
+      .custom((value) => safeEmail(value) != null)
+      .withMessage("Please provide a valid email"),
+    body("otp").isLength({ min: 4 }).withMessage("OTP is required"),
+    body("password")
+      .custom((value) => {
+        if (typeof value !== "string") return false;
+        return value.length >= 6 && value.length <= 128;
+      })
+      .withMessage("Password must be between 6 and 128 characters"),
+  ],
+  handleValidation,
+  async (req, res) => {
+    try {
+      const email = safeEmail(req.body.email);
+      const otp = String(req.body.otp || "").trim();
+      const password = String(req.body.password || "");
+
+      const stored = await PasswordResetOtp.findOne({ email });
+      if (!stored || stored.expiresAt.getTime() < Date.now()) {
+        if (stored) await PasswordResetOtp.deleteOne({ email });
+        return res.status(400).json({
+          message: "Invalid or expired verification code. Please request a new one.",
+        });
+      }
+
+      if (!otpCodesMatch(stored.otp, otp)) {
+        return res.status(400).json({ message: "Invalid verification code." });
+      }
+
+      const user = await User.findOne({ email }).select("+password");
+      if (!user) {
+        await PasswordResetOtp.deleteOne({ email });
+        return res.status(400).json({
+          message: "Invalid or expired verification code. Please request a new one.",
+        });
+      }
+
+      user.password = password;
+      user.passwordResetToken = undefined;
+      user.passwordResetExpires = undefined;
+      if (!user.provider || user.provider === "google") {
+        user.provider = "local";
+      }
+      await user.save();
+      await PasswordResetOtp.deleteOne({ email });
+
+      return res.json({
+        success: true,
+        message: "Password updated. You can now sign in.",
+      });
     } catch (error) {
       res.status(500).json({ message: error.message });
     }
