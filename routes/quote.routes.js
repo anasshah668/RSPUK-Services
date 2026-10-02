@@ -1,7 +1,7 @@
 import express from "express";
 import { body, validationResult } from "express-validator";
 import Quote from "../models/Quote.js";
-import { isSesConfigured, sendEmail } from "../config/ses.js";
+import { isSesConfigured, sendEmail, getEmailLogoUrl } from "../config/ses.js";
 import { protect, admin } from "../middleware/auth.js";
 import { upload, uploadToS3 } from "../config/s3.js";
 
@@ -230,9 +230,7 @@ router.post("/:id/send-email", protect, admin, async (req, res) => {
     const brandName = process.env.BRAND_NAME || "RSP";
     const brandPrimary = "#0ea5e9"; // blue-500
     const brandAccent = "#f59e0b"; // amber-500
-    const brandLogo =
-      process.env.BRAND_LOGO_URL ||
-      `${process.env.APP_BASE_URL || ""}/logo.png`;
+    const brandLogo = getEmailLogoUrl();
 
     const safe = (s) =>
       String(s || "")

@@ -3,7 +3,7 @@ import { body, validationResult } from "express-validator";
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import crypto from "crypto";
-import { isSesConfigured, sendEmail } from "../config/ses.js";
+import { isSesConfigured, sendEmail, getEmailLogoUrl } from "../config/ses.js";
 import User from "../models/User.js";
 import SignupOtp from "../models/SignupOtp.js";
 import PasswordResetOtp from "../models/PasswordResetOtp.js";
@@ -20,8 +20,23 @@ import {
 import { safeEmail } from "../utils/safeAuthInput.js";
 
 const router = express.Router();
-const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+const frontendUrl = process.env.FRONTEND_URL || "https://riversigns.co.uk";
 const SIGNUP_OTP_TTL_MS = 10 * 60 * 1000;
+
+const emailLogoImg = () =>
+  `<img src="${getEmailLogoUrl()}" alt="River Signs &amp; Print" width="160" height="44" border="0" style="display:block;width:160px;height:auto;max-width:180px;border:0;outline:none;" />`;
+
+const emailBrandHeader = (eyebrow) => `
+        <tr>
+          <td style="padding:18px 24px;background-color:#ffffff;border-bottom:1px solid #e5e7eb;">
+            ${emailLogoImg()}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:14px 24px;background-color:#1d4ed8;color:#ffffff;">
+            <p style="margin:0;font-size:13px;font-weight:700;color:#ffffff;">${eyebrow}</p>
+          </td>
+        </tr>`;
 
 const authFailureDelay = () =>
   new Promise((resolve) => {
@@ -83,17 +98,10 @@ const otpCodesMatch = (stored, provided) => {
 
 const sendSignupOtpEmail = async ({ email, otp, name }) => {
   const subject = "Your River Sign & Printing One-Time Password";
-  const logoUrl = `${frontendUrl.replace(/\/+$/, "")}/logo.png`;
   const html = `
     <div style="background:#f4f6fb;padding:24px 0;font-family:Arial,sans-serif;color:#111827">
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">
-        <tr>
-          <td style="background:linear-gradient(90deg,#1d4ed8,#2563eb);padding:18px 24px;color:#ffffff">
-            <img src="${logoUrl}" alt="Tiver Sign & Printing" style="height:44px;max-width:180px;object-fit:contain;display:block;margin-bottom:10px" />
-            <h2 style="margin:0;font-size:20px;font-weight:700">Tiver Sign &amp; Printing</h2>
-            <p style="margin:6px 0 0;font-size:13px;opacity:0.95">Secure Account Verification</p>
-          </td>
-        </tr>
+        ${emailBrandHeader("Secure account verification")}
         <tr>
           <td style="padding:24px">
             <p style="margin:0 0 12px;font-size:15px">Hello ${name || "there"},</p>
@@ -134,17 +142,10 @@ const sendPasswordResetEmail = async ({ email, name, resetToken, context }) => {
   const subject = isAdmin
     ? "Reset your admin password — River Sign & Printing"
     : "Reset your password — River Sign & Printing";
-  const logoUrl = `${frontendUrl.replace(/\/+$/, "")}/logo.png`;
   const html = `
     <div style="background:#f4f6fb;padding:24px 0;font-family:Arial,sans-serif;color:#111827">
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">
-        <tr>
-          <td style="background:linear-gradient(90deg,#1d4ed8,#2563eb);padding:18px 24px;color:#ffffff">
-            <img src="${logoUrl}" alt="River Sign & Printing" style="height:44px;max-width:180px;object-fit:contain;display:block;margin-bottom:10px" />
-            <h2 style="margin:0;font-size:20px;font-weight:700">River Sign &amp; Printing</h2>
-            <p style="margin:6px 0 0;font-size:13px;opacity:0.95">${isAdmin ? "Admin password reset" : "Password reset"}</p>
-          </td>
-        </tr>
+        ${emailBrandHeader(isAdmin ? "Admin password reset" : "Password reset")}
         <tr>
           <td style="padding:24px">
             <p style="margin:0 0 12px;font-size:15px">Hello ${name || "there"},</p>
@@ -182,17 +183,10 @@ const sendPasswordResetEmail = async ({ email, name, resetToken, context }) => {
 
 const sendPasswordResetOtpEmail = async ({ email, otp, name }) => {
   const subject = "Your River Sign & Printing password reset code";
-  const logoUrl = `${frontendUrl.replace(/\/+$/, "")}/logo.png`;
   const html = `
     <div style="background:#f4f6fb;padding:24px 0;font-family:Arial,sans-serif;color:#111827">
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">
-        <tr>
-          <td style="background:linear-gradient(90deg,#1d4ed8,#2563eb);padding:18px 24px;color:#ffffff">
-            <img src="${logoUrl}" alt="River Sign & Printing" style="height:44px;max-width:180px;object-fit:contain;display:block;margin-bottom:10px" />
-            <h2 style="margin:0;font-size:20px;font-weight:700">River Sign &amp; Printing</h2>
-            <p style="margin:6px 0 0;font-size:13px;opacity:0.95">Password reset verification</p>
-          </td>
-        </tr>
+        ${emailBrandHeader("Password reset verification")}
         <tr>
           <td style="padding:24px">
             <p style="margin:0 0 12px;font-size:15px">Hello ${name || "there"},</p>
