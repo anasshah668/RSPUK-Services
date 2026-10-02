@@ -66,9 +66,8 @@ const productSchema = new mongoose.Schema({
   features: [String],
   faqs: [faqItemSchema],
   specifications: {
-    dimensions: String,
-    weight: String,
-    material: String,
+    type: mongoose.Schema.Types.Mixed,
+    default: {},
   },
   customizationOptions: {
     allowText: { type: Boolean, default: true },

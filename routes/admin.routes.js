@@ -29,6 +29,16 @@ import { isThirdPartyAdminOrder } from "../services/tradeprintOrderTracking.js";
 
 const router = express.Router();
 
+const parseJsonField = (value) => {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+};
+
 const normalizeFaqs = (input) => {
   if (!Array.isArray(input)) return [];
   return input
@@ -37,6 +47,31 @@ const normalizeFaqs = (input) => {
       answer: String(item?.answer || "").trim(),
     }))
     .filter((item) => item.question && item.answer);
+};
+
+const normalizeFeatures = (input) => {
+  if (typeof input === "string") {
+    const trimmed = input.trim();
+    if (!trimmed) return [];
+    const parsed = parseJsonField(trimmed);
+    if (parsed !== undefined) return normalizeFeatures(parsed);
+    return trimmed
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+  if (!Array.isArray(input)) return [];
+  return input.map((item) => String(item || "").trim()).filter(Boolean);
+};
+
+const normalizeSpecifications = (input) => {
+  const parsed = typeof input === "string" ? parseJsonField(input) : input;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  return Object.fromEntries(
+    Object.entries(parsed)
+      .map(([key, value]) => [String(key || "").trim(), String(value ?? "").trim()])
+      .filter(([key, value]) => key && value),
+  );
 };
 
 // All admin routes require authentication and admin role
@@ -160,6 +195,12 @@ router.post(
           console.warn("Invalid faqs JSON, ignoring:", e?.message);
         }
       }
+      if (req.body.features !== undefined) {
+        productData.features = normalizeFeatures(req.body.features);
+      }
+      if (req.body.specifications !== undefined) {
+        productData.specifications = normalizeSpecifications(req.body.specifications);
+      }
 
       // Validate basePrice
       if (isNaN(productData.basePrice) || productData.basePrice <= 0) {
@@ -272,6 +313,13 @@ router.put(
         } catch (e) {
           console.warn("Invalid faqs JSON, ignoring:", e?.message);
         }
+      }
+      if (req.body.features !== undefined) {
+        product.features = normalizeFeatures(req.body.features);
+      }
+      if (req.body.specifications !== undefined) {
+        product.specifications = normalizeSpecifications(req.body.specifications);
+        product.markModified("specifications");
       }
 
       // Admin-managed catalogue products stay in-house; never inherit Tradeprint routing.
