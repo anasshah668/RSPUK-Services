@@ -3,6 +3,10 @@ import { randomUUID } from "crypto";
 import Cart from "../models/Cart.js";
 import { optionalAuth } from "../middleware/optionalAuth.js";
 import { protect } from "../middleware/auth.js";
+import {
+  cartLinesMatch,
+  shouldNeverMergeLine,
+} from "../utils/cartLineIdentity.js";
 
 const router = express.Router();
 
@@ -79,24 +83,16 @@ router.post("/merge", protect, async (req, res) => {
     }
 
     for (const line of guestCart.items) {
-      const pid = line.payload?.id != null ? String(line.payload.id) : null;
-      if (!pid) {
-        userCart.items.push({
-          lineId: line.lineId || randomUUID(),
-          payload: line.payload,
-          quantity: line.quantity,
-        });
-        continue;
-      }
-      const existing = userCart.items.find(
-        (i) => String(i.payload?.id) === pid,
-      );
+      const payload = line.payload && typeof line.payload === "object" ? line.payload : {};
+      const existing =
+        !shouldNeverMergeLine(payload) &&
+        userCart.items.find((i) => cartLinesMatch(i.payload, payload));
       if (existing) {
         existing.quantity += line.quantity;
       } else {
         userCart.items.push({
           lineId: line.lineId || randomUUID(),
-          payload: line.payload,
+          payload,
           quantity: line.quantity,
         });
       }
@@ -160,14 +156,28 @@ router.post("/items", withCart, async (req, res) => {
 
     // Design service is always a single line per request — replace payload, do not stack qty.
     const isDesignService = payload.type === "design-service";
+    const existing = isDesignService
+      ? cart.items.find((i) => String(i.payload?.id) === pid)
+      : shouldNeverMergeLine(payload)
+        ? null
+        : cart.items.find((i) => cartLinesMatch(i.payload, payload));
 
-    const existing = cart.items.find((i) => String(i.payload?.id) === pid);
     if (existing) {
       if (isDesignService) {
         existing.payload = payload;
         existing.quantity = 1;
       } else {
         existing.quantity += qty;
+        // Keep the incoming artwork and options; never overwrite fileUrls with empty.
+        existing.payload = {
+          ...existing.payload,
+          ...payload,
+          fileUrls: Array.isArray(payload.fileUrls) && payload.fileUrls.length
+            ? payload.fileUrls
+            : existing.payload?.fileUrls,
+          artworkPreviewUrl:
+            payload.artworkPreviewUrl || existing.payload?.artworkPreviewUrl,
+        };
       }
     } else {
       cart.items.push({
