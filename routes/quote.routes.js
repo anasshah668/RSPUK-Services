@@ -264,7 +264,7 @@ router.post("/:id/send-email", protect, admin, async (req, res) => {
     .cta { display:inline-block; background:${brandPrimary}; color:#ffffff; text-decoration:none; font-weight:700; font-size:14px; padding:12px 18px; border-radius:10px; }
     .muted { color:#64748b; font-size:12px; }
     .footer { max-width:640px; margin:18px auto 0; text-align:center; color:#64748b; font-size:12px; }
-    .logo { width:120px; height:auto; display:block; margin:0 auto 8px; }
+    .logo { width:120px; height:auto; display:block; margin:0 auto 10px; }
     .artwork { width:120px; height:120px; border-radius:12px; border:1px solid #e5e7eb; object-fit:cover; display:block; }
     @media (prefers-color-scheme: dark) {
       body { background:#0b1220; color:#e5e7eb; }
@@ -281,6 +281,7 @@ router.post("/:id/send-email", protect, admin, async (req, res) => {
   <div class="container">
     <div class="card">
       <div class="header">
+        <img class="logo" src="${safe(brandLogo)}" alt="${safe(brandName)} Logo" style="margin:0 0 14px 0;" />
         <h1>Quotation for ${safe(quote.projectType || "your project")}</h1>
         <div class="tag">${safe(brandName)} QUOTE</div>
       </div>
@@ -362,7 +363,6 @@ router.post("/:id/send-email", protect, admin, async (req, res) => {
     </div>
 
     <div class="footer">
-      <img class="logo" src="${safe(brandLogo)}" alt="${safe(brandName)} Logo" />
       <div style="margin-top:4px;">© ${new Date().getFullYear()} ${safe(brandName)}. All rights reserved.</div>
       <div class="muted" style="margin-top:6px;">
         This email was sent regarding your quotation request.

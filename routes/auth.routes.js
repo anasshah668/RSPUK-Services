@@ -28,13 +28,9 @@ const emailLogoImg = () =>
 
 const emailBrandHeader = (eyebrow) => `
         <tr>
-          <td style="padding:18px 24px;background-color:#ffffff;border-bottom:1px solid #e5e7eb;">
+          <td style="padding:20px 24px;background-color:#0f172a;">
             ${emailLogoImg()}
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:14px 24px;background-color:#1d4ed8;color:#ffffff;">
-            <p style="margin:0;font-size:13px;font-weight:700;color:#ffffff;">${eyebrow}</p>
+            <p style="margin:12px 0 0 0;font-size:13px;font-weight:700;color:#ffffff;">${eyebrow}</p>
           </td>
         </tr>`;
 
