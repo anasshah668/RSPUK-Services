@@ -19,7 +19,30 @@ import {
   deleteFeaturedSignageMediaAdmin,
 } from "../controllers/featuredSignageMedia.controller.js";
 import { protect, admin } from "../middleware/auth.js";
-import { IMAGE_MIME, presignPutObject, upload, uploadMultipleToS3 } from "../config/s3.js";
+import {
+  IMAGE_MIME,
+  deleteStoredObjects,
+  persistImageRecord,
+  presignPutObject,
+  upload,
+  uploadMultipleToS3,
+} from "../config/s3.js";
+
+const parseImageList = (raw) => {
+  if (raw == null || raw === "") return null;
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((img) => persistImageRecord(img))
+      .filter(Boolean);
+  } catch {
+    return null;
+  }
+};
+
+const imageIdentity = (img) =>
+  String(img?.publicId || "").trim() || String(img?.url || "").trim();
 import {
   listCheckoutOrders,
   normalizeCheckoutRowForAdmin,
@@ -80,13 +103,25 @@ router.use(admin);
 
 // ==================== PRODUCT MANAGEMENT ====================
 
+// @route   GET /api/admin/products
+// @desc    List every catalogue product for admin, including inactive
+// @access  Private/Admin
+router.get("/products", async (req, res) => {
+  try {
+    const products = await Product.find().sort({ createdAt: -1 });
+    res.json({ products, total: products.length });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // @route   POST /api/admin/products
 // @desc    Create new product
 // @access  Private/Admin
 router.post(
   "/products",
   (req, res, next) => {
-    upload.array("images", 5)(req, res, (err) => {
+    upload.array("images", 10)(req, res, (err) => {
       if (err) {
         console.error("Multer error:", err);
         return res.status(400).json({ message: err.message });
@@ -229,7 +264,7 @@ router.post(
 router.put(
   "/products/:id",
   (req, res, next) => {
-    upload.array("images", 5)(req, res, (err) => {
+    upload.array("images", 10)(req, res, (err) => {
       if (err) {
         console.error("Multer error:", err);
         return res.status(400).json({ message: err.message });
@@ -248,14 +283,31 @@ router.put(
         return res.status(404).json({ message: "Product not found" });
       }
 
-      // Handle new image uploads
+      const currentImages = Array.isArray(product.images) ? [...product.images] : [];
+      const keptImages = parseImageList(req.body.existingImages);
+      const baseImages = keptImages == null ? currentImages : keptImages;
+
+      if (keptImages != null) {
+        const keptIds = new Set(keptImages.map(imageIdentity).filter(Boolean));
+        const removed = currentImages.filter((img) => {
+          const id = imageIdentity(img);
+          return id && !keptIds.has(id);
+        });
+        if (removed.length) {
+          await deleteStoredObjects(removed);
+        }
+      }
+
+      let uploadedImages = [];
       if (req.files && req.files.length > 0) {
-        const newImages = await uploadMultipleToS3(
+        uploadedImages = await uploadMultipleToS3(
           req.files,
           "printing-platform/products",
         );
-        product.images = [...product.images, ...newImages];
       }
+      product.images = [...baseImages, ...uploadedImages]
+        .map((img) => persistImageRecord(img))
+        .filter(Boolean);
 
       // Update product fields
       if (req.body.name) product.name = req.body.name.trim();
@@ -335,6 +387,8 @@ router.put(
           url: primary.url || "",
           publicId: primary.publicId || "",
         };
+      } else {
+        product.productImage = { url: "", publicId: "" };
       }
 
       await product.save();
@@ -356,6 +410,10 @@ router.delete("/products/:id", async (req, res) => {
       return res.status(404).json({ message: "Product not found" });
     }
 
+    await deleteStoredObjects(product.images);
+    if (product.productImage?.publicId || product.productImage?.url) {
+      await deleteStoredObjects([product.productImage]);
+    }
     await product.deleteOne();
     res.json({ message: "Product deleted" });
   } catch (error) {

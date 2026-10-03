@@ -2,6 +2,7 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  DeleteObjectCommand,
   PutBucketCorsCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -232,6 +233,31 @@ export const S3_CORS_RULES = [
 export const isAllowedStoredKey = (urlOrKey) => {
   const key = keyFromStoredValue(urlOrKey) || String(urlOrKey || '').replace(/^\/+/, '');
   return key.startsWith('printing-platform/');
+};
+
+export const deleteStoredObject = async (urlOrKey) => {
+  const key = keyFromStoredValue(urlOrKey) || String(urlOrKey || '').replace(/^\/+/, '');
+  if (!key.startsWith('printing-platform/')) return false;
+  try {
+    assertS3Config();
+    await s3.send(
+      new DeleteObjectCommand({
+        Bucket: bucket,
+        Key: key,
+      }),
+    );
+    return true;
+  } catch (error) {
+    console.warn('[s3] delete failed', key, error?.message || error);
+    return false;
+  }
+};
+
+export const deleteStoredObjects = async (images = []) => {
+  const list = Array.isArray(images) ? images : [];
+  await Promise.all(
+    list.map((img) => deleteStoredObject(img?.publicId || img?.url || img)),
+  );
 };
 
 export const streamStoredObject = async (urlOrKey, { range } = {}) => {
