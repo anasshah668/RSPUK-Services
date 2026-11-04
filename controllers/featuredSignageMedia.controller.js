@@ -1,5 +1,12 @@
 import FeaturedSignageMedia from '../models/FeaturedSignageMedia.js';
-import { persistImageRecord, uploadMultipleToS3, withReadableUrls } from '../config/s3.js';
+import {
+  deleteStoredObjects,
+  persistImageRecord,
+  uploadMultipleToS3,
+  withReadableUrls,
+} from '../config/s3.js';
+
+const imageKey = (img) => String(img?.publicId || img?.url || '').trim();
 
 const normalizeSlug = (slug) => String(slug || '').trim().toLowerCase();
 
@@ -120,6 +127,16 @@ export const updateFeaturedSignageMediaAdmin = async (req, res) => {
       });
     }
 
+    const current = await FeaturedSignageMedia.findOne({ categorySlug }).lean();
+    const keptIds = new Set(mergedImages.map(imageKey).filter(Boolean));
+    const removed = (Array.isArray(current?.images) ? current.images : []).filter((img) => {
+      const id = imageKey(img);
+      return id && !keptIds.has(id);
+    });
+    if (removed.length) {
+      await deleteStoredObjects(removed);
+    }
+
     const row = await FeaturedSignageMedia.findOneAndUpdate(
       { categorySlug },
       { categorySlug, images: mergedImages },
@@ -142,7 +159,10 @@ export const deleteFeaturedSignageMediaAdmin = async (req, res) => {
     if (!categorySlug) {
       return res.status(400).json({ message: 'categorySlug is required' });
     }
-    await FeaturedSignageMedia.findOneAndDelete({ categorySlug });
+    const row = await FeaturedSignageMedia.findOneAndDelete({ categorySlug }).lean();
+    if (Array.isArray(row?.images) && row.images.length) {
+      await deleteStoredObjects(row.images);
+    }
     res.json({ categorySlug, images: [], cleared: true });
   } catch (error) {
     res.status(500).json({ message: error.message || 'Failed to clear featured media' });

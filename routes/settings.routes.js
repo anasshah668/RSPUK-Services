@@ -3,7 +3,7 @@ import SiteSetting from '../models/SiteSetting.js';
 import GalleryProject from '../models/GalleryProject.js';
 import Faq from '../models/Faq.js';
 import { protect, admin } from '../middleware/auth.js';
-import { upload, uploadMultipleToS3 } from '../config/s3.js';
+import { deleteStoredObjects, upload, uploadMultipleToS3 } from '../config/s3.js';
 import {
   getDesignServicePrice,
   saveDesignServicePrice,
@@ -200,6 +200,17 @@ router.put('/gallery-projects/:id', runGalleryUpload, protect, admin, async (req
       return res.status(400).json({ message: 'At least one gallery image is required' });
     }
 
+    const keptIds = new Set(
+      mergedImages.map((img) => String(img.publicId || img.url || '').trim()).filter(Boolean),
+    );
+    const removed = (Array.isArray(project.images) ? project.images : []).filter((img) => {
+      const id = String(img?.publicId || img?.url || '').trim();
+      return id && !keptIds.has(id);
+    });
+    if (removed.length) {
+      await deleteStoredObjects(removed);
+    }
+
     project.title = payload.title;
     project.description = payload.description;
     project.isActive = payload.isActive;
@@ -218,6 +229,9 @@ router.delete('/gallery-projects/:id', protect, admin, async (req, res) => {
   try {
     const project = await GalleryProject.findById(req.params.id);
     if (!project) return res.status(404).json({ message: 'Gallery project not found' });
+    if (Array.isArray(project.images) && project.images.length) {
+      await deleteStoredObjects(project.images);
+    }
     await project.deleteOne();
     res.json({ message: 'Gallery project deleted' });
   } catch (error) {
