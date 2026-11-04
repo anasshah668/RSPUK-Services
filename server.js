@@ -34,6 +34,7 @@ const CORS_ALLOWED_HEADERS = [
   'X-Client-Id',
   'X-Requested-With',
   'X-Admin-Gate-Token',
+  'X-Access-Token',
   'x-checkout-orders-token',
 ];
 
@@ -48,7 +49,7 @@ app.use(
   }),
 );
 app.options('*', cors({ origin: true, credentials: true, allowedHeaders: CORS_ALLOWED_HEADERS }));
-app.use(express.json({ limit: '32kb' }));
+app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(passport.initialize());
 

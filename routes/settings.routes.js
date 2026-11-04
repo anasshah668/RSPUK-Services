@@ -28,6 +28,28 @@ const normalizeGalleryProjectPayload = (body = {}) => ({
   displayOrder: Number.isFinite(Number(body.displayOrder)) ? Number(body.displayOrder) : 0,
 });
 
+const runGalleryUpload = (req, res, next) => {
+  const contentType = String(req.headers['content-type'] || '');
+  if (!contentType.includes('multipart/form-data')) {
+    return next();
+  }
+  upload.array('images', 20)(req, res, (err) => {
+    if (err) {
+      const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(status).json({
+        message:
+          err.code === 'LIMIT_FILE_SIZE'
+            ? 'Each picture must be under 8 MB. Compress it or upload one at a time.'
+            : err.message || 'Upload failed',
+      });
+    }
+    if (req.body?.authToken && !req.headers.authorization) {
+      req.headers.authorization = `Bearer ${String(req.body.authToken).trim()}`;
+    }
+    next();
+  });
+};
+
 const normalizeFaqPayload = (body = {}) => ({
   question: String(body.question || '').trim(),
   answer: String(body.answer || '').trim(),
@@ -116,20 +138,7 @@ router.get('/gallery-projects/admin', protect, admin, async (req, res) => {
 });
 
 // Admin: create gallery project
-router.post('/gallery-projects', protect, admin, (req, res, next) => {
-  upload.array('images', 20)(req, res, (err) => {
-    if (err) {
-      const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
-      return res.status(status).json({
-        message:
-          err.code === 'LIMIT_FILE_SIZE'
-            ? 'Each picture must be under 8 MB. Compress it or upload one at a time.'
-            : err.message || 'Upload failed',
-      });
-    }
-    next();
-  });
-}, async (req, res) => {
+router.post('/gallery-projects', runGalleryUpload, protect, admin, async (req, res) => {
   try {
     const payload = normalizeGalleryProjectPayload(req.body);
     if (!payload.title) {
@@ -155,20 +164,7 @@ router.post('/gallery-projects', protect, admin, (req, res, next) => {
 });
 
 // Admin: update gallery project
-router.put('/gallery-projects/:id', protect, admin, (req, res, next) => {
-  upload.array('images', 20)(req, res, (err) => {
-    if (err) {
-      const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
-      return res.status(status).json({
-        message:
-          err.code === 'LIMIT_FILE_SIZE'
-            ? 'Each picture must be under 8 MB. Compress it or upload one at a time.'
-            : err.message || 'Upload failed',
-      });
-    }
-    next();
-  });
-}, async (req, res) => {
+router.put('/gallery-projects/:id', runGalleryUpload, protect, admin, async (req, res) => {
   try {
     const project = await GalleryProject.findById(req.params.id);
     if (!project) return res.status(404).json({ message: 'Gallery project not found' });
