@@ -85,6 +85,7 @@ export const calculateFeaturedSignagePricePublic = async (req, res) => {
       designServiceRequired,
       productSpecific,
       sizeOnly,
+      includeAddons,
     } = req.body || {};
 
     const slug = String(categorySlug || '_default').toLowerCase();
@@ -105,6 +106,7 @@ export const calculateFeaturedSignagePricePublic = async (req, res) => {
         designServiceRequired,
         productSpecific: productSpecific || {},
         sizeOnly: Boolean(sizeOnly),
+        includeAddons: Boolean(includeAddons),
       },
       settings
     );

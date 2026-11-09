@@ -92,6 +92,7 @@ const letterFt = computeFeaturedSignagePrice(
     unit: 'ft',
     quantity: 1,
     productSpecific: { letterHeight: 1 },
+    includeAddons: true,
   },
   { ...widthOnly, letterHeightCmRate: 4 }
 );
@@ -103,6 +104,7 @@ const letterMm = computeFeaturedSignagePrice(
     unit: 'mm',
     quantity: 1,
     productSpecific: { letterHeight: 304.8 },
+    includeAddons: true,
   },
   { ...widthOnly, letterHeightCmRate: 4 }
 );
@@ -119,6 +121,7 @@ const withExtras = computeFeaturedSignagePrice(
     installationRequired: 'yes',
     productSpecific: { lighting: 'yes' },
     categorySlug: '2d-box-signage',
+    includeAddons: true,
   },
   { ...widthOnly, outdoorAddon: 5, installationAddon: 20, lighting_yes: 8, minOrderPrice: 50 }
 );
@@ -138,5 +141,19 @@ const sizeOnly = computeFeaturedSignagePrice(
 );
 assert(sizeOnly.total === 10, `size-only estimate expected 10, got ${sizeOnly.total}`);
 assert(withExtras.total === 50, `full quote should include extras/min order, got ${withExtras.total}`);
+
+const legacyEstimate = computeFeaturedSignagePrice(
+  {
+    width: 1,
+    height: 1,
+    unit: 'ft',
+    quantity: 1,
+    usage: 'indoor',
+    productSpecific: { lighting: 'yes' },
+    categorySlug: '2d-box-signage',
+  },
+  { ...widthOnly, lighting_yes: 8 }
+);
+assert(legacyEstimate.total === 10, `legacy estimate without includeAddons expected 10, got ${legacyEstimate.total}`);
 
 console.log('Featured unit conversion checks passed.');

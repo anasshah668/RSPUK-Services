@@ -170,15 +170,15 @@ export function computeFeaturedSignagePrice(input, settings) {
     });
   }
 
-  const sizeOnly = Boolean(input.sizeOnly);
+  const includeAddons = input.includeAddons === true && input.sizeOnly !== true;
   let unitPrice = size;
-  if (!sizeOnly) {
+  if (includeAddons) {
     unitPrice += globalAddons(input, settings, lines);
     unitPrice += productAddons(input.categorySlug, input.productSpecific, settings, lines, unit);
   }
 
   let subtotal = unitPrice * quantity;
-  const minOrder = sizeOnly ? 0 : addon(settings, 'minOrderPrice');
+  const minOrder = includeAddons ? addon(settings, 'minOrderPrice') : 0;
   if (minOrder > 0 && subtotal < minOrder) {
     lines.push({ label: 'Minimum order adjustment', amount: roundMoney(minOrder - subtotal) });
     subtotal = minOrder;
