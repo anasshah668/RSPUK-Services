@@ -23,9 +23,9 @@ export const FEATURED_PRICING_CATEGORIES = [
 
 const commonFields = [
   { key: 'basePrice', label: 'Base price (£)', step: '0.01' },
-  { key: 'widthCmRate', label: 'Per cm width (£)', step: '0.01' },
-  { key: 'heightCmRate', label: 'Per cm height (£)', step: '0.01' },
-  { key: 'areaCm2Rate', label: 'Per cm² area (£) — used when > 0 instead of width+height rates', step: '0.0001' },
+  { key: 'widthCmRate', label: 'Per ft width (£)', step: '0.01' },
+  { key: 'heightCmRate', label: 'Per ft height (£)', step: '0.01' },
+  { key: 'areaCm2Rate', label: 'Per ft² area (£) — used when > 0 instead of width+height rates', step: '0.0001' },
   { key: 'minOrderPrice', label: 'Minimum order total (£)', step: '0.01' },
   { key: 'outdoorAddon', label: 'Outdoor usage add-on (£)', step: '0.01' },
   { key: 'installationAddon', label: 'Installation required (£)', step: '0.01' },
@@ -37,7 +37,7 @@ const commonFields = [
 const categoryExtraFields = {
   '3d-built-up-letters': [
     { key: 'letterUnitAddon', label: 'Per letter (£)', step: '0.01' },
-    { key: 'letterHeightCmRate', label: 'Per cm letter height (£)', step: '0.01' },
+    { key: 'letterHeightCmRate', label: 'Per ft letter height (£)', step: '0.01' },
     { key: 'material_metal', label: 'Material: Metal (£)', step: '0.01' },
     { key: 'material_aluminum', label: 'Material: Aluminum (£)', step: '0.01' },
     { key: 'lightingType_backlit', label: 'Lighting: Backlit (£)', step: '0.01' },

@@ -1,18 +1,13 @@
 /**
  * Server-side featured signage price calculator.
  * All amounts are ex-VAT (net) unless the client applies VAT for display.
+ *
+ * Admin size rates (widthCmRate, heightCmRate, areaCm2Rate, letterHeightCmRate)
+ * are always per foot / per square foot. Customer dimensions in mm, cm, or inches
+ * are converted to feet before those rates are applied.
  */
 
-function parseDimensionToCm(value, unit) {
-  if (value === undefined || value === null) return 0;
-  const num = parseFloat(String(value).replace(/[^\d.]/g, '')) || 0;
-  if (num <= 0) return 0;
-  const u = String(unit || 'mm').toLowerCase();
-  if (u === 'ft' || u === 'feet') return num * 30.48;
-  if (u === 'inch' || u === 'in') return num * 2.54;
-  if (u === 'm' || u === 'meter' || u === 'metre') return num * 100;
-  return num / 10; // mm → cm
-}
+import { parseDimensionToFt, normalizeDimensionUnit } from './dimensionToFeet.js';
 
 function roundMoney(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
@@ -23,8 +18,8 @@ function addon(settings, key) {
 }
 
 function sizeComponent(width, height, unit, settings) {
-  const w = parseDimensionToCm(width, unit);
-  const h = parseDimensionToCm(height, unit);
+  const w = parseDimensionToFt(width, unit);
+  const h = parseDimensionToFt(height, unit);
   if (w <= 0 || h <= 0) return 0;
 
   const base = addon(settings, 'basePrice');
@@ -65,7 +60,7 @@ function globalAddons(input, settings, lines) {
   return total;
 }
 
-function productAddons(categorySlug, productSpecific, settings, lines) {
+function productAddons(categorySlug, productSpecific, settings, lines, unit) {
   const ps = productSpecific || {};
   let total = 0;
   const slug = String(categorySlug || '').toLowerCase();
@@ -87,7 +82,7 @@ function productAddons(categorySlug, productSpecific, settings, lines) {
         if (letterTotal) lines.push({ label: `Letters (${letters} × £${per})`, amount: letterTotal });
         total += letterTotal;
       }
-      const lh = parseDimensionToCm(ps.letterHeight, 'mm');
+      const lh = parseDimensionToFt(ps.letterHeight, unit);
       if (lh > 0) {
         const rate = addon(settings, 'letterHeightCmRate');
         const lhTotal = lh * rate;
@@ -165,7 +160,8 @@ export function computeFeaturedSignagePrice(input, settings) {
     };
   }
 
-  const size = sizeComponent(input.width, input.height, input.unit, settings);
+  const unit = normalizeDimensionUnit(input.unit);
+  const size = sizeComponent(input.width, input.height, unit, settings);
   if (size > 0) {
     const areaRate = addon(settings, 'areaCm2Rate');
     lines.push({
@@ -176,7 +172,7 @@ export function computeFeaturedSignagePrice(input, settings) {
 
   let unitPrice = size;
   unitPrice += globalAddons(input, settings, lines);
-  unitPrice += productAddons(input.categorySlug, input.productSpecific, settings, lines);
+  unitPrice += productAddons(input.categorySlug, input.productSpecific, settings, lines, unit);
 
   let subtotal = unitPrice * quantity;
   const minOrder = addon(settings, 'minOrderPrice');
