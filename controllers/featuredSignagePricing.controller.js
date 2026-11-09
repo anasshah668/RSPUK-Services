@@ -84,6 +84,7 @@ export const calculateFeaturedSignagePricePublic = async (req, res) => {
       rushOrder,
       designServiceRequired,
       productSpecific,
+      sizeOnly,
     } = req.body || {};
 
     const slug = String(categorySlug || '_default').toLowerCase();
@@ -103,6 +104,7 @@ export const calculateFeaturedSignagePricePublic = async (req, res) => {
         rushOrder,
         designServiceRequired,
         productSpecific: productSpecific || {},
+        sizeOnly: Boolean(sizeOnly),
       },
       settings
     );

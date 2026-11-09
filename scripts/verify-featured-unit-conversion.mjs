@@ -109,4 +109,34 @@ const letterMm = computeFeaturedSignagePrice(
 assert(letterFt.total === letterMm.total, `letter height mismatch ${letterFt.total} vs ${letterMm.total}`);
 assert(letterFt.total === 14, `letter height 1ft @ £4 + width £10 expected 14, got ${letterFt.total}`);
 
+const withExtras = computeFeaturedSignagePrice(
+  {
+    width: 1,
+    height: 1,
+    unit: 'ft',
+    quantity: 1,
+    usage: 'outdoor',
+    installationRequired: 'yes',
+    productSpecific: { lighting: 'yes' },
+    categorySlug: '2d-box-signage',
+  },
+  { ...widthOnly, outdoorAddon: 5, installationAddon: 20, lighting_yes: 8, minOrderPrice: 50 }
+);
+const sizeOnly = computeFeaturedSignagePrice(
+  {
+    width: 1,
+    height: 1,
+    unit: 'ft',
+    quantity: 1,
+    usage: 'outdoor',
+    installationRequired: 'yes',
+    productSpecific: { lighting: 'yes' },
+    categorySlug: '2d-box-signage',
+    sizeOnly: true,
+  },
+  { ...widthOnly, outdoorAddon: 5, installationAddon: 20, lighting_yes: 8, minOrderPrice: 50 }
+);
+assert(sizeOnly.total === 10, `size-only estimate expected 10, got ${sizeOnly.total}`);
+assert(withExtras.total === 50, `full quote should include extras/min order, got ${withExtras.total}`);
+
 console.log('Featured unit conversion checks passed.');
